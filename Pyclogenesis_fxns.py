@@ -44,18 +44,18 @@ def tc_list(track_file,data_source,flip_lon=False,calendar='standard',region=Non
     
 
 def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',region=None):
-    ''' Using a track data file and a specified data source, formats data to work with TC_landfalls.
+    ''' Using a track data file and a specified data source, formats data to work with Pyclogenesis.
         Parameters: 
-            track_file (str):
-            data_source (str):
-            flip_lon (bool):
-            calendar (str):
-            region (str):
+            track_file (str): track data file to be processed.
+            data_source (str): specification of where data is coming from (options: 'obs','model','reanalysis').
+            flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default: False).
+            calendar (str): specification of model calendar type (options: 'standard')
+            region (str): specification of track region. If None, returns global track dataset (default: None).
             
         Returns:
-            track_dat (pandas.DataFrame):
-            landfrac_points (pandas.DataFrame):
-            landfrac_values (pandas.DataFrame):
+            track_dat (pandas.DataFrame): raw list of storm tracks
+            landfrac_points (pandas.DataFrame): grid of landfrac points
+            landfrac_values (pandas.DataFrame): grid of landfrac values
 
     '''
     # Load land fraction data
@@ -290,16 +290,16 @@ def region_bounds(region,lon,lat):
     return in_region
 
 def interp_location_landfrac(storm_df,landfrac_points,landfrac_values,frequency,calendar='standard'):
-    ''' Using a track data file and a specified data source, formats data to work with TC_landfalls
+    ''' Interpolates track dataset to a specified time frequency.
         Parameters: 
-            storm_df (pandas.DataFrame):
-            landffac_points (pandas.DataFrame):
-            landfrac_values (pandas.DataFrame):
-            frequency (str):
-            calendar (str):
+            storm_df (pandas.DataFrame): raw storm track data.
+            landfrac_points (pandas.DataFrame): grid of land fraction points.
+            landfrac_values (pandas.DataFrame): grid of land fraction values.
+            frequency (str): time frequency for interpolation.
+            calendar (str): specification of model calendar type (options: 'standard').
             
         Returns:
-            interped_df (pandas.DataFrame):
+            interped_df (pandas.DataFrame): interpolated storm track data.
 
     '''
     
@@ -349,10 +349,16 @@ def interp_location_landfrac(storm_df,landfrac_points,landfrac_values,frequency,
 def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency='1H',
                       num_storms=None,calendar='standard'):
     ''' Creates complete list of storm tracks with all associated information.
-        Parameters: 
-            
+        Parameters:
+            track_dat (pandas.DataFrame):
+            landfrac_points (pandas.DataFrame):
+            landfrac_values (pandas.DataFrame):
+            frequency (str):
+            num_storms (int):
+            calendar (str):
             
         Returns:
+            storms (pandas.DataFrame):
             
 
     '''
@@ -383,27 +389,31 @@ def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency='1H',
             count += 1
         
 
-    storm_landfracs = pd.concat(storm_sid_land_list,axis=0) # Combine all storms into one dataframe again
+    storms = pd.concat(storm_sid_land_list,axis=0) # Combine all storms into one dataframe again
     
-    storm_landfracs.loc[storm_landfracs['LANDFRAC']<=.5,'LANDFRAC'] = 0
-    storm_landfracs.loc[storm_landfracs['LANDFRAC']>.5,'LANDFRAC'] = 1
+    storms.loc[storms['LANDFRAC']<=.5,'LANDFRAC'] = 0
+    storms.loc[storms['LANDFRAC']>.5,'LANDFRAC'] = 1
     
     print('Storm list generated!')
     
-    return storm_landfracs
+    return storms
 
 
                         
-def find_landfalls(storm_landfracs,hours_over_water=12,states=False):
-    ''' Plots landfalls within a user-specified U.S. state/territory.
+def find_landfalls(storms,hours_over_water=12,states=False):
+    ''' Creates a list of landfalling and nonlandfalling storms.
         Parameters: 
-            storm_landfracs (pandas.DataFrame):
+            storms (pandas.DataFrame):
             hours_over_water (int):
             states (bool):
             state_df (pandas.DataFrame):
             
         Returns:
-            None
+            landfalls (pandas.DataFrame):
+            landfalls_satellite (pandas.DataFrame):
+            landfalls_states (pandas.DataFrame):
+            nonlandfalls (pandas.DataFrame):
+            
 
     '''
     # Read in US state shapefiles
@@ -484,8 +494,8 @@ def find_landfalls(storm_landfracs,hours_over_water=12,states=False):
 
                         
 def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_speed',
-                  scattercolor='blue',linecolor='gainsboro',linewidth=0.25,legend=False,
-                  legend_colors=None,track_labels=None):
+                    scattercolor='blue',linecolor='gainsboro',linewidth=0.25,legend=False,
+                    legend_colors=None,track_labels=None):
     ''' Plots storm tracks, wind speed, and landfall points (if applicable) by location.
         Parameters: 
             
