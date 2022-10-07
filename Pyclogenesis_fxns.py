@@ -56,7 +56,6 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
             track_dat (pandas.DataFrame): raw list of storm tracks
             landfrac_points (pandas.DataFrame): grid of landfrac points
             landfrac_values (pandas.DataFrame): grid of landfrac values
-
     '''
     # Load land fraction data
     landfrac_dat = '/storage/work/ajb8224/TC_landfall_data/landfrac_data/USGS_gtopo30_0.23x0.31_remap_c180612_PHIS_LANDFRAC.nc'
@@ -258,7 +257,6 @@ def region_bounds(region,lon,lat):
             
         Returns:
             in_region (bool):
-
     '''
     in_region = False
     
@@ -300,7 +298,6 @@ def interp_location_landfrac(storm_df,landfrac_points,landfrac_values,frequency,
             
         Returns:
             interped_df (pandas.DataFrame): interpolated storm track data.
-
     '''
     
     if calendar == 'standard':
@@ -360,7 +357,6 @@ def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency='1H',
         Returns:
             storms (pandas.DataFrame):
             
-
     '''
     storm_sid_land_list = []                                # Array of pandas dataframes
     count = 0
@@ -414,7 +410,6 @@ def find_landfalls(storms,hours_over_water=12,states=False):
             landfalls_states (pandas.DataFrame):
             nonlandfalls (pandas.DataFrame):
             
-
     '''
     # Read in US state shapefiles
     if states:
@@ -439,10 +434,11 @@ def find_landfalls(storms,hours_over_water=12,states=False):
 
     landings_list = []
     landings_satellite_list = []
-    non_landings_list = []
+    nonlandings_list = []
+    nonlandings_satellite_list = []
     
-    for sid in storm_landfracs.index.levels[0]: # Iterate through SIDs
-        storm_df = storm_landfracs.xs(sid,level=0)
+    for sid in storms.index.levels[0]: # Iterate through SIDs
+        storm_df = storms.xs(sid,level=0)
         
         for itime, time in enumerate(storm_df.index.values): # For all times and time indices in storm_df...
             if (storm_df.loc[time,'LANDFRAC'] > 0.5).all():  # Check if landfrac value is greater than 0.5...
@@ -450,26 +446,30 @@ def find_landfalls(storms,hours_over_water=12,states=False):
                 if itime >= hours_over_water:
                     # Append to landfall list if all of the above conditions are met
                     if (storm_df.iloc[itime-hours_over_water:itime]['LANDFRAC'] <= 0.5).all():
-                        landings_list.append(storm_landfracs.loc[[(sid,time)]])
+                        landings_list.append(storms.loc[[(sid,time)]])
                         # Append to satellite landfall list if the year is 1979 or later
                         if int(sid[:4])>=1979:
-                            landings_satellite_list.append(storm_landfracs.loc[[(sid,time)]])
+                            landings_satellite_list.append(storms.loc[[(sid,time)]])
                             
                 # Alternative check for storms that make landfall at less than X hours old, where X = hours_over water...
                 else:
                     if (itime > 0) and (storm_df.iloc[0:itime]['LANDFRAC'] <= 0.5).all():
-                        landings_list.append(storm_landfracs.loc[[(sid,time)]])
+                        landings_list.append(storms.loc[[(sid,time)]])
                         if int(sid[:4])>=1979:
-                            landings_satellite_list.append(storm_landfracs.loc[[(sid,time)]])     
+                            landings_satellite_list.append(storms.loc[[(sid,time)]])     
                             
             elif itime == (len(storm_df)-1):
-                non_landings_list.append(storm_landfracs.loc[[(sid,time)]])
-                
+                nonlandings_list.append(storms.loc[[(sid,time)]])
+                if int(sid[:4])>=1979:
+                    nonlandings_satellite_list.append(storms.loc[[(sid,time)]]) 
+                    
     landfalls = pd.concat(landings_list,axis=0)
     
-    landfalls_satellite = pd.concat(landings_satellite_list)
+    landfalls_satellite = pd.concat(landings_satellite_list,axis=0)
     
-    non_landfalls = pd.concat(non_landings_list,axis=0)
+    nonlandfalls = pd.concat(nonlandings_list,axis=0)
+    
+    nonlandfalls_satellite = pd.concat(nonlandings_satellite_list,axis=0)
     
     # Categorize landfalls by state using shapefiles
     if states == True:
@@ -489,7 +489,7 @@ def find_landfalls(storms,hours_over_water=12,states=False):
         
         return landfalls, landfalls_satellite, landfalls_states, non_landfalls
     
-    return landfalls, landfalls_satellite, non_landfalls
+    return landfalls, landfalls_satellite, nonlandfalls, nonlandfalls_satellite
 
 
                         
@@ -501,7 +501,6 @@ def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_sp
             
         Returns:
             
-
     '''
     storm_list = np.unique(storms.index.get_level_values(0))
     ws=False
@@ -581,7 +580,7 @@ def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_sp
                 print("Storm {} did not make landfall.".format(storm_number_id))
                 
     # Return SID if only plotting one storm
-    if len(storm_numbers) = 1:
+    if len(storm_numbers) == 1:
         return storm_number_id
 
                         
@@ -598,20 +597,19 @@ def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCar
             
         Returns:
             None
-
     '''
     # Add extent    
     lonW, lonE, latS, latN = extent[0], extent[1], extent[2], extent[3]
 
     # Add lat/lon ticks
-    ax.set_yticks(np.arange(latS,latN+1,lat_ticks), crs=ccrs.PlateCarree(), minor=False)
-    ax.set_yticks(np.arange(latS,latN+1,lon_ticks/2), crs=ccrs.PlateCarree(), minor=True)
+    ax.set_yticks(np.arange(latS+15,latN+1,lat_ticks), crs=ccrs.PlateCarree(), minor=False)
+    ax.set_yticks(np.arange(latS+15,latN+1,lon_ticks/2), crs=ccrs.PlateCarree(), minor=True)
     
     ax.set_xticks(np.arange(lonW,lonE,lon_ticks), crs=ccrs.PlateCarree(), minor=False)
     ax.set_xticks(np.arange(lonW,lonE,lon_ticks/2), crs=ccrs.PlateCarree(), minor=True)
     
     ax.set_xticklabels(np.arange(lonW,lonE,lon_ticks),fontsize=fontsize)
-    ax.set_yticklabels(np.arange(latS,latN+1,lat_ticks),fontsize=fontsize)
+    ax.set_yticklabels(np.arange(latS+15,latN+1,lat_ticks),fontsize=fontsize)
     
     lon_formatter = LongitudeFormatter(zero_direction_label=True)
     lat_formatter = LatitudeFormatter()
@@ -642,7 +640,6 @@ def manual_regional_lf_plt(ax,landings_satellite,extent=[-100,-60,15,50],color='
             
         Returns:
             None
-
     '''
     
     # Define region bounds
@@ -659,18 +656,15 @@ def manual_regional_lf_plt(ax,landings_satellite,extent=[-100,-60,15,50],color='
 
     
     
-def track_density_plot(ax,storms,landfalls,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap='inferno'):
+def track_density_plot(ax,storms,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap='inferno'):
     ''' Plots a 2D histogram displaying track density
     Parameters: 
         ax (arr):
         storms (pandas.DataFrame):
-        landfalls (pandas.DataFrame):
         bins (int or arr)):
         cmap (str):
-
     Returns:
         plot:
-
     '''
     h,x,y,plot = ax.hist2d(storms.LON.values,storms.LAT.values, bins=bins, cmap=cmap)
     return plot
@@ -697,10 +691,8 @@ def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
         nonlandfall_color (str)
         edgecolor(str):
         linewidth (float):
-
     Returns:
         None
-
     '''
     try:
         # Iterate through indiviadual storms in landfalls DataFrame
@@ -728,29 +720,29 @@ def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
                            edgecolor=edgecolor,zorder=5,linewidths=linewidth)
                 
         # Iterate through indiviadual storms in nonlandfalls DataFrame
-        if nonlandfalls not None:
+        if nonlandfalls != None:
             for sid in nonlandfalls.index.levels[0]:
-            storm_df = nonlandfalls.xs(sid,level=0)
-            GEN_LAT  = storm_df.GEN_LAT.values[0]
-            GEN_LON  = storm_df.GEN_LON.values[0]
+                storm_df = nonlandfalls.xs(sid,level=0)
+                GEN_LAT  = storm_df.GEN_LAT.values[0]
+                GEN_LON  = storm_df.GEN_LON.values[0]
 
-            # MDR: 10-20N, 80-20W
-            gen_S  = gen_south
-            gen_N  = gen_north
-            gen_W  = gen_west
-            gen_E  = gen_east
+                # MDR: 10-20N, 80-20W
+                gen_S  = gen_south
+                gen_N  = gen_north
+                gen_W  = gen_west
+                gen_E  = gen_east
 
-            lat_check = (GEN_LAT>gen_S) & (GEN_LAT<gen_N)
-            lon_check = (GEN_LON>gen_W) & (GEN_LON<gen_E)
-            
-            # Check if storm genesis point falls within defined region
-            if lat_check & lon_check:
-                # Plot genesis point
-                ax.scatter(GEN_LON,GEN_LAT,s=size,facecolor=gen_color,edgecolor=edgecolor,
-                           zorder=5,linewidths=linewidth)
-                # Plot nonlandfall point
-                ax.scatter(storm_df.LON.values,storm_df.LAT.values,s=size,facecolor=nonlandfall_color,
-                           edgecolor=edgecolor,zorder=5,linewidths=linewidth)
+                lat_check = (GEN_LAT>gen_S) & (GEN_LAT<gen_N)
+                lon_check = (GEN_LON>gen_W) & (GEN_LON<gen_E)
+
+                # Check if storm genesis point falls within defined region
+                if lat_check & lon_check:
+                    # Plot genesis point
+                    ax.scatter(GEN_LON,GEN_LAT,s=size,facecolor=gen_color,edgecolor=edgecolor,
+                               zorder=5,linewidths=linewidth)
+                    # Plot nonlandfall point
+                    ax.scatter(storm_df.LON.values,storm_df.LAT.values,s=size,facecolor=nonlandfall_color,
+                               edgecolor=edgecolor,zorder=5,linewidths=linewidth)
                 
     # If no points within given bounds are detected
     except:
@@ -758,7 +750,7 @@ def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
           
             
             
-def lf_to_gen_plot(ax,landfalls,nonlandfalls=None,
+def lf_to_gen_plot(ax,landfalls,nonlandfalls=None,lf=True,nlf=True,
                   lf_south=10,lf_north=25,lf_west=-80,lf_east=-20,size=2.5,
                   gen_color_lf='blue',landfall_color='limegreen',gen_color_nlf='yellow',nonlandfall_color='red',
                   edgecolor='white',linewidth=0.5):
@@ -778,51 +770,51 @@ def lf_to_gen_plot(ax,landfalls,nonlandfalls=None,
         nonlandfall_color (str): color of cyclolysis point over water
         edgecolor(str): color of scatter point edge
         linewidth (float): width of scatter point edge
-
     Returns:
         None
-
     '''    
     try:
-        for sid in landfalls.index.levels[0]:
-            storm_df = landfalls.xs(sid,level=0)
-            LF_LAT  = storm_df.LAT.values[0]
-            LF_LON  = storm_df.LON.values[0]
+        if lf:
+            for sid in landfalls.index.levels[0]:
+                storm_df = landfalls.xs(sid,level=0)
+                LF_LAT  = storm_df.LAT.values[0]
+                LF_LON  = storm_df.LON.values[0]
 
-            # MDR: 10-20N, 80-20W
-            lf_S  = lf_south
-            lf_N  = lf_north
-            lf_W  = lf_west
-            lf_E  = lf_east
+                # MDR: 10-20N, 80-20W
+                lf_S  = lf_south
+                lf_N  = lf_north
+                lf_W  = lf_west
+                lf_E  = lf_east
 
-            lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
-            lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
-            
-            if lat_check & lon_check:
-                ax.scatter(LF_LON,LF_LAT,s=size,facecolor=landfall_color,edgecolor=edgecolor,
-                           zorder=5,linewidths=linewidth)
-                ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_lf,
-                           edgecolor=edgecolor,zorder=5,linewidths=linewidth)
+                lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
+                lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
+
+                if lat_check & lon_check:
+                    ax.scatter(LF_LON,LF_LAT,s=size,facecolor=landfall_color,edgecolor=edgecolor,
+                               zorder=5,linewidths=linewidth)
+                    ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_lf,
+                               edgecolor=edgecolor,zorder=5,linewidths=linewidth)
         
-        for sid in nonlandfalls.index.levels[0]:
-            storm_df = nonlandfalls.xs(sid,level=0)
-            LF_LAT  = storm_df.LAT.values[0]
-            LF_LON  = storm_df.LON.values[0]
+        if nlf:
+            for sid in nonlandfalls.index.levels[0]:
+                storm_df = nonlandfalls.xs(sid,level=0)
+                LF_LAT  = storm_df.LAT.values[0]
+                LF_LON  = storm_df.LON.values[0]
 
-            # MDR: 10-20N, 80-20W
-            lf_S  = lf_south
-            lf_N  = lf_north
-            lf_W  = lf_west
-            lf_E  = lf_east
+                # MDR: 10-20N, 80-20W
+                lf_S  = lf_south
+                lf_N  = lf_north
+                lf_W  = lf_west
+                lf_E  = lf_east
 
-            lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
-            lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
-            
-            if lat_check & lon_check:
-                ax.scatter(LF_LON,LF_LAT,s=size,facecolor=nonlandfall_color,edgecolor=edgecolor,
-                           zorder=5,linewidths=linewidth)
-                ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_nlf,
-                           edgecolor=edgecolor,zorder=5,linewidths=linewidth)
+                lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
+                lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
+
+                if lat_check & lon_check:
+                    ax.scatter(LF_LON,LF_LAT,s=size,facecolor=nonlandfall_color,edgecolor=edgecolor,
+                               zorder=5,linewidths=linewidth)
+                    ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_nlf,
+                               edgecolor=edgecolor,zorder=5,linewidths=linewidth)
     
     # If no points within given bounds are detected
     except:
@@ -843,7 +835,6 @@ def regional_lf_plot(ax,landings_satellite,landing_states,state_names,colors=['w
             
         Returns:
             None
-
     '''
     for state, color in zip(state_names,colors):
         lf = landing_states[landing_states['Location']==state]
@@ -864,10 +855,8 @@ def temporal_lf_plot(ax,landings_satellite,size=5,lw=0.25, pre_col='white',early
         peak_col (str):
         post_col (str):
         edgecolor (str):
-
     Returns:
         None
-
     '''
     
     # Pre-season: March, April, May
@@ -900,8 +889,5 @@ def temporal_lf_plot(ax,landings_satellite,size=5,lw=0.25, pre_col='white',early
     ax.scatter(post_szn.LON, post_szn.LAT, c=post_col, edgecolor=edgecolor, linewidth=lw, s=size, zorder=2, label=labels[4])
     
     ax.legend(ncol=1,fontsize='xx-small',loc='upper right',markerscale=2)
-
-
-
 
 
