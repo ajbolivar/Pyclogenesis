@@ -13,43 +13,53 @@ import shapely.geometry as shp_geom
 import netCDF4 as nc
 import cftime
 
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
 
 def tc_list(track_file,data_source,flip_lon=False,calendar='standard',region=None,
-            frequency='1H',hours_over_water=12,states=False):
+            frequency='1H',interval=3,hours_over_water=12,start_year=1979):
     '''A master function that calls all other functions in Pyclogenesis to return a complete list of storm track data and landfall locations.
        Parameters: 
-           track_file (str):
-           data_source (str):
-           flip_lon (bool):
+           track_file (str): filepath of the storm track data to be processed.
+           data_source (str): specification of where the data is coming from (options: 'obs','model','reanalysis').
+           flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default = False).
+           calendar (str): specification of model calendar type (options: 'standard', '360-day'; default = 'standard')
+           region (str): specification of track region. If None, returns global track dataset (default = No.ne).
+           frequency (str): desired time frequency for interpolation (default = '1H').
+           interval (int): time interval (in hours) of input file data (default = 3).
+           hours_over_water (int): minimum hours that a landfalling storm must be over water before another landfall is counted (default = 12). 
+           states (bool): when True, extra analysis is performed to categorize landfalls by U.S. state (default = False).
             
        Returns:
-           track_dat (pandas.DataFrame):
-           landfrac_points (pandas.DataFrame):
-           landfrac_values (pandas.DataFrame):
+           track_dat (pandas.DataFrame): track data converted to a DataFrame.
+           landfrac_points (pandas.DataFrame): grid of landfraction points according to model grid spacing.
+           landfrac_values (pandas.DataFrame): land fraction values from source.
     '''
     
-    track_dat, landfrac_points, landfrac_values = load_track_data(track_file=track_file,data_source=data_source,flip_lon=flip_lon,calendar=calendar,region=region)
-    storms = create_storm_list(track_dat=track_dat,landfrac_points=landfrac_points,landfrac_values=landfrac_values,frequency=frequency,calendar=calendar)
+    track_dat, landfrac_points, landfrac_values = load_track_data(track_file=track_file,data_source=data_source,flip_lon=flip_lon,calendar=calendar,region=region,start_year=start_year)
+    storms = create_storm_list(track_dat=track_dat,landfrac_points=landfrac_points,landfrac_values=landfrac_values,frequency=frequency,interval=interval,calendar=calendar)
     
-    if states:
-        landfalls, landfalls_states, nonlandfalls = find_landfalls(storms=storms,hours_over_water=hours_over_water,states=states)
-        return storms, landfalls, landfalls_states, nonlandfalls
+    #if states:
+    #    landfalls, landfalls_states, nonlandfalls = find_landfalls(storms=storms,hours_over_water=hours_over_water,states=states)
+    #    return storms, landfalls, landfalls_states, nonlandfalls
     
-    else:
-        landfalls, nonlandfalls = find_landfalls(storms=storms,hours_over_water=hours_over_water,states=states)
-        return storms, landfalls, nonlandfalls
+    #else:
+    landfalls, nonlandfalls = find_landfalls(storms=storms,hours_over_water=hours_over_water)
+    return storms, landfalls, nonlandfalls
     
-    
-    
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
 
-def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',region=None):
+def load_track_data(track_file,data_source,flip_lon,calendar,region,start_year):
     ''' Using a track data file and a specified data source, formats data to work with Pyclogenesis.
         Parameters: 
-            track_file (str): track data file to be processed.
-            data_source (str): specification of where data is coming from (options: 'obs','model','reanalysis').
-            flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default: False).
+            track_file (str):filepath of the storm track data to be processed.
+            data_source (str): specification of where the data is coming from (options: 'obs','model','reanalysis').
+            flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default = False).
             calendar (str): specification of model calendar type (options: 'standard')
-            region (str): specification of track region. If None, returns global track dataset (default: None).
+            region (str): specification of track region. If None, returns global track dataset (default = None).
             
         Returns:
             track_dat (pandas.DataFrame): raw list of storm tracks
@@ -57,21 +67,22 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
             landfrac_values (pandas.DataFrame): grid of landfrac values
     '''
     # Load land fraction data
-    landfrac_dat = '/storage/work/ajb8224/Pyclogenesis_data/landfrac_data/USGS_gtopo30_0.23x0.31_remap_c180612_PHIS_LANDFRAC.nc'
+    # MODIFY FILEPATH ACCORDING TO WHERE YOU STORE YOUR DATA
+    landfrac_dat = '/glade/work/abolivar/Pyclogenesis_data/landfrac_data/USGS_gtopo30_0.23x0.31_remap_c180612_PHIS_LANDFRAC.nc'
     print("Loading track data located at '{}'...".format(track_file))
 
     landfrac = xr.open_dataset(landfrac_dat)
     landfrac = landfrac.assign_coords(lon = (((landfrac.lon + 180) % 360) - 180))
     landfrac = landfrac.sortby('lon')
-    
+
     # Observational dataset
     if data_source == 'obs':
         # Read file
         track_dat = pd.read_csv(track_file, usecols = ['SID','ISO_TIME','LAT','LON','WMO_WIND','WMO_PRES'], 
-                                index_col=['SID','ISO_TIME'],parse_dates=True)[1:]
+                                index_col=['SID','ISO_TIME'],parse_dates=True,low_memory=False)[1:]
         
-        track_dat['LAT']   = track_dat['LAT'].astype(float)
-        track_dat['LON']   = track_dat['LON'].astype(float)
+        track_dat['LAT']   = track_dat['LAT'].copy().astype(float)
+        track_dat['LON']   = track_dat['LON'].copy().astype(float)
         track_dat_WMO_WIND = track_dat['WMO_WIND']
         track_dat_WMO_PRES = track_dat['WMO_PRES']
         
@@ -100,7 +111,9 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
         time_check = (hour_check) & (minute_check) & (second_check)
         track_dat = track_dat.loc[time_check]
         
-        print(track_dat)
+        # Truncate dataset to specified start time
+        start = pd.to_datetime(track_dat.index.get_level_values(1)).year >= start_year
+        track_dat = track_dat.loc[start]
         
         gen_lat = []
         gen_lon = []
@@ -115,6 +128,9 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
         track_dat['GEN_LAT'] = gen_lat
         track_dat['GEN_LON'] = gen_lon
         
+        track_dat['LON']     = np.where(track_dat.LON.values < 180, track_dat.LON.values, track_dat.LON.values - 360)
+        track_dat['LON']     = np.where(track_dat.LON.values > -180, track_dat.LON.values, track_dat.LON.values + 360)
+        
     # Model/reanalysis datasets
     elif data_source == 'model' or data_source == 'reanalysis':
         # Create unique 3-character strings for all storm IDs
@@ -127,7 +143,8 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
         for alpha1 in alphabets:
             for alpha2 in alphabets:
                 for alpha3 in alphabets:
-                    indices.append(alpha1+alpha2+alpha3)
+                    for alpha4 in alphabets:
+                        indices.append(alpha1+alpha2+alpha3+alpha4)
         
         # Read file
         td = open(track_file)   
@@ -140,7 +157,7 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
 
         tracks = td.readlines()
         abc = 0
-        
+
         # Parse file into workable data
         for i in range(0, len(tracks)):
             # Use 'start' line to extract information
@@ -189,11 +206,11 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
 
                     storm_indices.append(i)
                     abc+=1
- 
+                    
         # Create DataFrame from track file, skip header rows (those beginning with start)
         track_dat = pd.read_table(track_file, skiprows=storm_indices, usecols=np.arange(3,12,1),
-                                       delimiter = '\t', header=None, 
-                                       names=['LON','LAT','PRES','WIND','LANDFRAC','YYYY','MM','DD','HH'])
+                                  delimiter = '\t', header=None, 
+                                  names=['LON','LAT','PRES','WIND','LANDFRAC','YYYY','MM','DD','HH'])
         
         track_dat['SID'] = storm_ids
         track_dat['GEN_LON'] = gen_lon
@@ -213,26 +230,42 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
             for time in storm.index:
                 y, m, d, h = [int(storm.loc[time,'YYYY']), int(storm.loc[time,'MM']), 
                               int(storm.loc[time,'DD']), int(storm.loc[time,'HH'])]
-                t = '{}{:02d}{:02d}{:02d}'.format(y,m,d,h)
-
+                
                 if calendar == 'standard':
+                    t = '{}{:02d}{:02d}{:02d}'.format(y,m,d,h)
                     iso_time.append(pd.to_datetime(t, format='%Y%m%d%H'))
 
-                else:
-                    iso_time.append(int(t))
+                elif calendar == '360-day':
+                    t = '{}-{:02d}-{:02d} {:02d}'.format(y,m,d,h)
+                    std_calendar = pd.date_range(start='1/1/1999',end='12/31/2000')
+                    calendar_365 = []
+                    
+                    for i in range(len(std_calendar)):
+                        md = std_calendar[i]
+                        md = str(md)[5:10]
+                        calendar_365.append(md)
+                    
+                    index = ((m - 1) * 30) + d - 1
+                    date = str('%02d' % m) + '-' + str('%02d' % d)
+                    new_t = t.replace(date,calendar_365[index])
+                    iso_time.append(pd.to_datetime(new_t, format='%Y-%m-%d %H'))
+
 
         track_dat['ISO_TIME'] = iso_time
         track_dat = track_dat.drop(columns=['YYYY','MM','DD','HH'])
         
         # Set additional indices: ISO_TIME, GEN_LON, GEN_LAT
         track_dat = track_dat.set_index(['ISO_TIME','GEN_LON','GEN_LAT'],append=True)
+        
+        # Truncate dataset to specified start time
+        start = track_dat.index.get_level_values(1).year >= start_year
+        track_dat = track_dat.loc[start]
     
     # Convert lon/lat from 0/360 to -180/180 if flip_lon is set to True
     if flip_lon:
-        lon_landfrac = (landfrac.lon.values + 180) % 360 - 180
         track_dat['LON'] = (track_dat.LON.values + 180) % 360 - 180
-    else:
-        lon_landfrac = landfrac.lon.values
+    
+    lon_landfrac = landfrac.lon.values
         
     # Create and fit landfrac mesh to lon/lat grid
     lat_landfrac = landfrac.lat.values
@@ -242,19 +275,23 @@ def load_track_data(track_file,data_source,flip_lon=False,calendar='standard',re
     landfrac_values = landfrac.LANDFRAC.values.flatten()
     
     track_dat = track_dat.sort_index()
-    print("Track data loaded!")
+    print("    Track data loaded!")
     
     return track_dat, landfrac_points, landfrac_values
+
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
 
 def region_bounds(region,lon,lat):
     ''' Determines whether a storm genesis point is within a specified geographic region.
         Parameters: 
-            region (str):
-            lon (str):
-            lat (str):
+            region (str): oceanic domain that defines region bounds (options = 'NA','EP','WP','IO','OC').
+            lon (float): longitude of storm genesis point to be checked.
+            lat (float): latitude of storm genesis point to be checked.
             
         Returns:
-            in_region (bool):
+            in_region (bool): True if point is in region, False if point is not in region.
     '''
     in_region = False
     
@@ -269,8 +306,10 @@ def region_bounds(region,lon,lat):
     ### INCOMPLETE
     # East Pacific
     if region == 'EP':
-        in_region = False
-        
+        if () and () and () and ():
+            in_region = False
+        else:
+            in_region = True
     # West Pacific    
     if region == 'WP':
         in_region = False
@@ -285,81 +324,92 @@ def region_bounds(region,lon,lat):
         
     return in_region
 
-def interp_location_landfrac(storm_df,landfrac_points,landfrac_values,frequency,calendar='standard'):
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
+
+def interp_location_landfrac(storm_df,landfrac_points,landfrac_values,frequency,interval):
     ''' Interpolates track dataset to a specified time frequency.
         Parameters: 
             storm_df (pandas.DataFrame): raw storm track data.
             landfrac_points (pandas.DataFrame): grid of land fraction points.
             landfrac_values (pandas.DataFrame): grid of land fraction values.
             frequency (str): time frequency for interpolation.
-            calendar (str): specification of model calendar type (options: 'standard').
+            interval (int): hourly interval of input data
             
         Returns:
             interped_df (pandas.DataFrame): interpolated storm track data.
     '''
     
-    if calendar == 'standard':
-        storm_times = storm_df.index.get_level_values('ISO_TIME')
-        # Set desired time range (according to desired frequency)
-        storm_time_hourly = pd.date_range(storm_times[0],storm_times[-1],freq=frequency)
-        temp_df = storm_df.copy()
-        temp_df = temp_df.reset_index()
-        
-        # Create new ISO_TIME column the length of storm_time_hourly, input existing times at appropriate indices
-        for time in storm_time_hourly:
-            length = len(temp_df)
-            if time not in storm_times:
-                temp_df.loc[length,'ISO_TIME'] = time
-        
-        temp_df = temp_df.set_index(['ISO_TIME'])
-        temp_df.index = pd.to_datetime(temp_df.index)
-        temp_df = temp_df.sort_index()
-        
-        # Linearly interpolate DataFrame
-        interped_df   = temp_df.interpolate(axis='index',method='linear')
-        temp_points   = list(zip(interped_df['LON'].values,interped_df['LAT'].values)) # Put points together as a list 
-        temp_landfrac = griddata(landfrac_points, landfrac_values, temp_points, # interpolate landfrac
-                                 method = 'nearest')
+    storm_times = storm_df.index.get_level_values('ISO_TIME')
+    if type(storm_times[0]) == str:
+        storm_times = pd.to_datetime(storm_times, format='%Y-%m-%d %H')
 
-        interped_df['LANDFRAC'] = temp_landfrac
-            
-    ### INCOMPLETE ###
+    # Set desired time range (according to desired frequency)
+    storm_time_hourly = pd.date_range(storm_times[0],storm_times[-1],freq=frequency)
+    temp_df           = storm_df.copy()
+    temp_df           = temp_df.reset_index()
+
+    # Create new ISO_TIME column the length of storm_time_hourly, input existing times at appropriate indices
+    for time in storm_time_hourly:
+        length = len(temp_df)
+        if time.strftime("%Y-%m-%d %H:%M:%S") not in storm_times:
+            temp_df.loc[length,'ISO_TIME'] = time
+
+    temp_df       = temp_df.set_index(['ISO_TIME'])
+    temp_df.index = pd.to_datetime(temp_df.index)
+    temp_df       = temp_df.sort_index()
+
+    # Linearly interpolate DataFrame
+    diff = temp_df.diff(periods=interval)
+    # For storm tracks that cross over the dateline, do some funky stuff so that pandas doesn't explode
+    if (abs(diff.LON.values) > 180).any():
+        # Make any lon values above 0 negative
+        temp_df['LON']     = np.where(temp_df.LON.values < 0, temp_df.LON.values, temp_df.LON.values - 360)
+        interped_df        = temp_df.interpolate(axis='index',method='linear')
+        # Convert them back into a -180/180 format
+        interped_df['LON'] = np.where(interped_df.LON.values > -180, interped_df.LON.values, interped_df.LON.values + 360)
+
     else:
-        temp_df = pd.DataFrame()
-        interp = []
-        
-        for sid in np.unique(storm_df.index.get_level_values(0))[::]:
-            storm = storm_df.xs(sid)
-            length = storm.shape(1)
-            
-            storm_array = storm.to_numpy()
+        interped_df   = temp_df.interpolate(axis='index',method='linear')
+
+    temp_points   = list(zip(interped_df['LON'].values,interped_df['LAT'].values)) # Put points together as a list 
+
+    temp_landfrac = griddata(landfrac_points,landfrac_values,temp_points,method='nearest') # Interpolate landfrac
+
+    interped_df['LANDFRAC'] = temp_landfrac
     
     return interped_df
-    
-    
-def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency='1H',
-                      num_storms=None,calendar='standard'):
+
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
+
+def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency,interval,calendar):
     ''' Creates complete list of storm tracks with all associated information.
         Parameters:
-            track_dat (pandas.DataFrame):
-            landfrac_points (pandas.DataFrame):
-            landfrac_values (pandas.DataFrame):
-            frequency (str):
-            num_storms (int):
-            calendar (str):
+            track_dat (pandas.DataFrame): complete, uninterpolated storm track data.
+            landfrac_points (pandas.DataFrame): grid of land fraction points.
+            landfrac_values (pandas.DataFrame): grid of land fraction values
+            frequency (str): time frequency for interpolation.
             
         Returns:
-            storms (pandas.DataFrame):
+            storms (pandas.DataFrame): complete, interpolated storm track data.
             
     '''
-    print("Generating storm list...")
+    print("    Generating storm list...")
     
     storm_sid_land_list = []                                # Array of pandas dataframes
     count = 0
 
+    print("        Interpolating data to {}...".format(frequency))
     for sid in np.unique(track_dat.index.get_level_values(0))[::]:   # Loop over SID
         storm_sid        = track_dat.xs(sid,level='SID').copy()  # Select the storm whose id is sid
-        storm_sid_interp = interp_location_landfrac(storm_sid,landfrac_points,landfrac_values,frequency)
+        storm_sid_interp = interp_location_landfrac(storm_sid,landfrac_points,landfrac_values,frequency,interval)
+        
+        if storm_sid_interp is None:
+            continue
+            
         storm_lats       = storm_sid_interp['LAT'].values        # Retrieve lats and lons for individual storm
         storm_lons       = storm_sid_interp['LON'].values
         storm_landfrac   = storm_sid_interp['LANDFRAC'].values
@@ -374,44 +424,39 @@ def create_storm_list(track_dat,landfrac_points,landfrac_values,frequency='1H',
 
         storm_sid_land_list.append(storm_sid_interp)
         
-        if num_storms is not None:
-            if count > num_storms:
-                break
-            
-            count += 1
-        
 
     storms = pd.concat(storm_sid_land_list,axis=0) # Combine all storms into one dataframe again
     
     storms.loc[storms['LANDFRAC']<=.5,'LANDFRAC'] = 0
     storms.loc[storms['LANDFRAC']>.5,'LANDFRAC'] = 1
     
-    print('Storm list generated!')
+    print('        Storm list generated!')
     
     return storms
 
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
 
-                        
 def find_landfalls(storms,hours_over_water=12,states=False):
     ''' Creates a list of landfalling and non-landfalling storms.
         Parameters: 
-            storms (pandas.DataFrame):
-            hours_over_water (int):
-            states (bool):
-            state_df (pandas.DataFrame):
+            storms (pandas.DataFrame): complete, interpolated storm track data.
+            hours_over_water (int): minimum number of hours that a landfalling storm must be over water before another landfall is counted.
+            states (bool): when True, extra analysis is performed to categorize landfalls by U.S. state.
             
         Returns:
-            landfalls (pandas.DataFrame):
-            landfalls_satellite (pandas.DataFrame):
-            landfalls_states (pandas.DataFrame):
-            nonlandfalls (pandas.DataFrame):
+            landfalls (pandas.DataFrame): complete list of landfalling storms.
+            landfalls_states (pandas.DataFrame): complete list of U.S. state landfalling storms.
+            nonlandfalls (pandas.DataFrame): complete list of non-landfalling storms.
             
     '''
-    print("Generating landfalling/non-landfalling storm list...")
+    print("    Generating landfalling/non-landfalling storm lists...")
     
     # Read in US state shapefiles
+    # MODIFY FILEPATH ACCORDING TO WHERE YOU STORE YOUR DATA
     if states:
-        US_states = shpreader.Reader("/storage/work/ajb8224/Pyclogenesis_data/cb_2018_us_state_500k/cb_2018_us_state_500k.shp")
+        US_states = shpreader.Reader("/glade/work/abolivar/Pyclogenesis_data/cb_2018_us_state_500k/cb_2018_us_state_500k.shp")
         states_records = US_states.records()
         lst = []
 
@@ -474,19 +519,33 @@ def find_landfalls(storms,hours_over_water=12,states=False):
         
         return landfalls, landfalls_states, nonlandfalls
     
-    print('Landfalling/non-landfalling storm lists generated!')
+    print('        Landfalling/non-landfalling storm lists generated!')
     
     return landfalls, nonlandfalls
 
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################  
 
-                        
-def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_speed',
+def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_speed',
                     scattercolor='blue',linecolor='gainsboro',linewidth=0.25,legend=False,
                     legend_colors=None,track_labels=None):
     ''' Plots storm tracks, wind speed, and landfall points (if applicable) by location.
         Parameters: 
+	    ax (int arr): axis to draw plot on.
+	    storm_numbers (int arr): number of storm tracks to plot (if all, specify length)
+            landfalls (pandas.DataFrame):
+	    size (float):
+	    plot_type (str):
+	    scattercolor (str):
+	    linecolor (str):
+	    linewidth (float):
+	    legend (bool):
+	    legend_colors (str arr):
+	    track_labels (str arr):
             
         Returns:
+	    storm_number_id (str):
             
     '''
     storm_list = np.unique(storms.index.get_level_values(0))
@@ -530,11 +589,6 @@ def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_sp
                                       markeredgecolor='white',markersize=0.75,linewidth=0))
 
                 ax.legend(handles=handles,ncol=1,fontsize='xx-small',loc='upper right',markerscale=4,labels=labels)
-                
-        # Plot landfrac values along track    
-        elif plot_type == 'landfrac':
-            ax.plot(x,y,color='gainsboro',linewidth=linewidth,transform=ccrs.PlateCarree())
-            ax.scatter(x_wind,y_wind,s=size,c=linecolor,transform=ccrs.PlateCarree())
            
         # Plot solid color track
         elif plot_type == 'solid':
@@ -571,9 +625,11 @@ def storm_track_plt(ax,storms,storm_numbers,landings,size=1.2,plot_type='wind_sp
     if len(storm_numbers) == 1:
         return storm_number_id
 
-                        
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################    
 
-def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCarree(),fontsize='x-small',title=None,
+def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCarree(),fontsize='x-small',
           borders='black',states_color='#2b5714',state_borders='black',ocean_color='#062045',land_color='#2b5714'):
     ''' Decorates plot to look more "map-like".
         Parameters: 
@@ -582,6 +638,12 @@ def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCar
             lat_ticks (float):
             lon_ticks (float):
             crs (cartopy projection):
+	    fontsize (str or float):
+	    borders (str):
+	    states_color (str):
+	    state_borders (str):
+	    ocean_color (str):
+	    land_color (str):
             
         Returns:
             None
@@ -606,9 +668,6 @@ def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCar
     
     ax.set_extent(extent,crs=ccrs.PlateCarree())
     
-    if title != None:
-        ax.title(title)
-    
     ax.add_feature(cfeature.LAND.with_scale('10m'),facecolor=land_color,edgecolor=borders,linewidth=0.25)
     ax.add_feature(cfeature.OCEAN.with_scale('10m'),facecolor=ocean_color,edgecolor=borders,linewidth=0.25)
     ax.add_feature(cfeature.BORDERS,facecolor='none',edgecolor=borders,linewidth=.25)
@@ -616,8 +675,10 @@ def mappy(ax,extent=[-100,-10,10,60],lat_ticks=15,lon_ticks=30,crs=ccrs.PlateCar
     ax.add_feature(cfeature.STATES,facecolor=states_color,edgecolor=state_borders,linewidth=.25)
     ax.add_feature(cfeature.LAKES.with_scale('110m'),edgecolor=borders,facecolor=ocean_color,linewidth=.25)
 
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################    
                         
-
 def manual_regional_lf_plt(ax,landfalls,extent=[-100,-60,15,50],color='white',size=10,lw=0.25,zorder=100):
     ''' Plots landfalls within an area specified by a user-defined lat/lon box.
         Parameters: 
@@ -644,7 +705,9 @@ def manual_regional_lf_plt(ax,landfalls,extent=[-100,-60,15,50],color='white',si
     ax.scatter(landings_sub.LON,landings_sub.LAT,facecolor=color,edgecolor='black',s=size,
                linewidth=lw,zorder=zorder)
 
-    
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################    
     
 def track_density_plot(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap='inferno'):
     ''' Plots a 2D histogram displaying track density
@@ -656,12 +719,12 @@ def track_density_plot(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap
     Returns:
         plot:
     '''
-    h,x,y = np.histogram2d(storms.LON.values,storms.LAT.values, bins = bins)
-    #h,x,y,plot = ax.hist2d(storms.LON.values,storms.LAT.values, bins=bins, cmap=cmap)
-    #return h
+    h,x,y = np.histogram2d(storms.LON.values,storms.LAT.values,bins = bins)
     return h, x, y
     
-
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
     
 def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
                   gen_south=10,gen_north=25,gen_west=-80,gen_east=-20,size=2.5,
@@ -686,6 +749,7 @@ def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
     Returns:
         None
     '''
+    
     try:
         # Iterate through indiviadual storms in landfalls DataFrame
         for sid in landfalls.index.levels[0]:
@@ -740,7 +804,9 @@ def gen_to_lf_plot(ax,landfalls,nonlandfalls=None,
     except:
         print('Model has no storm genesis points in the defined region.')
           
-            
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################            
             
 def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
                   lf_south=10,lf_north=25,lf_west=-80,lf_east=-20,size=2.5,
@@ -750,7 +816,7 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
     Parameters: 
         ax (arr):
         landfalls (pandas.DataFrame):
-        nonlandfalls (pandas.DataFrame)
+        nonlandfalls (pandas.DataFrame):
         gen_south (float): southern bound of region box (range from -90 to 90)
         gen_north (float): northern bound of region box (range from -90 to 90)
         gen_west (float): western bound of region box (range from -180 to 180)
@@ -768,13 +834,11 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
     
     try:
         if lf:
-            # print('pass')
             for sid in landfalls.index.get_level_values(0):
-                # print('pass1')
                 storm_df = landfalls.xs(sid,level=0)
                 LF_LAT  = storm_df.LAT.values[0]
                 LF_LON  = storm_df.LON.values[0]
-                # print('pass2')
+                
                 # MDR: 10-20N, 80-20W
                 lf_S  = lf_south
                 lf_N  = lf_north
@@ -783,9 +847,9 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
 
                 lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
                 lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
-                # print('pass3')
+
                 if lat_check & lon_check:
-                    # print('pass4')
+
                     ax.scatter(LF_LON,LF_LAT,s=size,facecolor=lf_color,edgecolor=lf_edge,
                                zorder=5,linewidths=linewidth)
                     ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_lf,
@@ -793,11 +857,11 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
         
         if nlf:
             for sid in nonlandfalls.index.get_level_values(0):
-                # print('pass1')
+
                 storm_df = nonlandfalls.xs(sid,level=0)
                 LF_LAT  = storm_df.LAT.values[0]
                 LF_LON  = storm_df.LON.values[0]
-                # print('pass2')
+
                 # MDR: 10-20N, 80-20W
                 lf_S  = lf_south
                 lf_N  = lf_north
@@ -806,9 +870,8 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
 
                 lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
                 lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
-                # print('pass3')
+
                 if lat_check & lon_check:
-                    # print('pass4')
                     ax.scatter(LF_LON,LF_LAT,s=size,facecolor=nlf_color,edgecolor=nlf_edge,
                                zorder=5,linewidths=linewidth)
                     ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=size,facecolor=gen_color_nlf,
@@ -818,6 +881,53 @@ def lf_to_gen_plot(ax,landfalls=None,nonlandfalls=None,lf=True,nlf=True,
     except:
         print('Model has no storm landfall points in the defined region.')
 
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################        
+
+def intensity_duration_plot(ax,storms,landfalls,cmap='inferno',vmin=900,vmax=1010,edgecolor='k',linewidth=0.25,alpha=0.6):
+    ''' Plots landfall points in a euclidean space relative to their genesis location centered at (0,0). Storm duration is shown by scatter point size and intensity is shown by a colormap.
+        Parameters: 
+            ax (arr):
+            storms (pandas.DataFrame):
+            landfalls (pandas.DataFrame):
+            cmap (str):
+            vmin (str):
+            vmax (float):
+            edgecolor (str):
+            linewidth (float):
+            alpha (float):
+            
+        Returns:
+            pm ():
+    '''
+    xdiffs = landfalls.LON.values-landfalls.GEN_LON.values
+    ydiffs = landfalls.LAT.values-landfalls.GEN_LAT.values
+
+    life = []
+    intensity = []
+    for sid in landfalls.index.get_level_values(0):
+        storm_df = storms.xs(sid,level=0)
+        datelist = []
+        dates = storm_df.index.get_level_values(0).astype('str').str[:10]
+        
+        for date in dates:
+            if date not in datelist:
+                datelist.append(date)
+
+        life.append(len(datelist))
+        intensity.append(np.nanmin(storm_df.PRES.values))
+        
+    pm = ax.scatter(xdiffs,ydiffs,s=life,edgecolor=edgecolor,linewidth=linewidth,
+                    c=intensity,cmap=cmap,vmin=vmin,vmax=vmax,alpha=alpha)
+    ax.set_xlim([-100,100])
+    ax.set_ylim([-40,40])
+    
+    return pm
+        
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################        
     
 def regional_lf_plot(ax,landfalls,landing_states,state_names,colors=['white'],size=4,lw=0.25,zorder=100):
     ''' Plots landfalls within a user-specified U.S. state/territory.
@@ -838,7 +948,9 @@ def regional_lf_plot(ax,landfalls,landing_states,state_names,colors=['white'],si
         lf = landing_states[landing_states['Location']==state]
         ax.scatter(lf.LON,lf.LAT,facecolor=color,edgecolor='black',s=size,linewidth=lw,zorder=zorder)
 
-                    
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################                    
 
 def temporal_lf_plot(ax,landfalls,size=5,lw=0.25, pre_col='white',early_col='yellow',peak_col='red',late_col='blue',post_col='white',edgecolor='black'):
     ''' Plots landfalls color-coded by seasonal timing (pre-season, early season, peak season,
@@ -888,7 +1000,9 @@ def temporal_lf_plot(ax,landfalls,size=5,lw=0.25, pre_col='white',early_col='yel
     
     ax.legend(ncol=1,fontsize='xx-small',loc='upper right',markerscale=2)
     
-
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################
 
 def storm_statistics(storms,landfalls,name,end_year=None,region=None,convert_pres=False):
     ''' Creates a csv containing several climatological TC statistics: avg TC count per year, avg landfall count per year, avg number of TC days per year, avg storm lifetime before landfall, med storm lifetime before landfall
@@ -902,24 +1016,23 @@ def storm_statistics(storms,landfalls,name,end_year=None,region=None,convert_pre
     '''
     # Length of dataset (in years)
     dataset_yrs = np.unique(storms.index.get_level_values(1).astype('str').str[:4].astype('int').values)
-    # print(dataset_yrs)
     
     # Truncate dataset to desired length
     if end_year != None:
-        length = len(np.where(np.logical_and(dataset_yrs >= 1979, dataset_yrs <= end_year))[0])
+        length = len(np.where(dataset_yrs <= end_year)[0])
     else:
-        length = len(np.where(dataset_yrs >= 1979)[0])
+        length = len(dataset_yrs[0])
     
     
     # Average annual TC count
-    yearly_count = np.round((len(np.unique(storms.loc[storms.index.get_level_values(0).str[:4].astype('int').values>=1979].index.get_level_values(0))))/length,decimals=1)
-    
+    yearly_count = np.round((len(np.unique(storms.index.get_level_values(0))))/length,decimals=1)
+
     # Average annual landfall count
     yearly_landfall_count = np.round((len(np.unique(landfalls.loc[landfalls.index.get_level_values(0).str[:4].astype('int').values>=1979].index.get_level_values(0))))/length,decimals=1)
     
     # Average annual number of TC days
     dates = []
-    for date in (np.unique(storms.index.get_level_values(1).astype('str').str[:10])) :
+    for date in (np.unique(storms.index.get_level_values(1).astype('str').str[:10])):
         dates.append(int(date[:4]))
 
     dates = np.asarray(dates)
@@ -928,7 +1041,6 @@ def storm_statistics(storms,landfalls,name,end_year=None,region=None,convert_pre
     # Average storm lifetime before landfall (in days)
     lifetimes = []
     for sid in (np.unique(landfalls.index.get_level_values(0))):
-        # print(sid)
         storm_df = storms.xs(sid,level=0)
         datelist = []
         dates = storm_df.index.get_level_values(0).astype('str').str[:10]
@@ -950,8 +1062,11 @@ def storm_statistics(storms,landfalls,name,end_year=None,region=None,convert_pre
     stats = pd.DataFrame([stats],columns=['NAME','AVG_COUNT','AVG_LF','AVG_DAYS','AVG_LIFE','MED_LIFE'])
     
     stats.to_csv('{}_TC_stats.csv'.format(name),index=False)
+    
     return stats
     
-    
+###################################################################################################################################################################
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~#
+###################################################################################################################################################################    
 
 
