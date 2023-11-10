@@ -6,32 +6,36 @@ from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
 import cartopy.io.shapereader as shpreader
 import os
 import shapely.geometry as shp_geom
+import random
 from Pyclogenesis import interpolate
 from Pyclogenesis import util
 
+
 def tc_list(tracks,data_source,interval,flip_lon=False,calendar='standard',
-            frequency='1H',hours_over_water=12,start_year=1979):
+            frequency='1H',hours_over_water=12,start_year=1979,no_ET=True):
     '''A master function that calls all other functions in Pyclogenesis to return a complete list of storm track data and landfall locations.
        Parameters: 
            tracks (str): filepath of the storm track data to be processed (file for obs, dir for model/reanalysis).
            data_source (str): specification of where the data is coming from (options: 'obs','model','reanalysis').
            flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default = False).
-           calendar (str): specification of model calendar type (options: 'standard', '360-day'; default = 'standard')
+           calendar (str): specification of model calendar type (options: 'standard', '360-day'; default = 'standard').
            frequency (str): desired time frequency for interpolation (default = '1H').
            interval (int): time interval (in hours) of input file data.
-           hours_over_water (int): minimum hours that a landfalling storm must be over water before another landfall is counted (default = 12). 
-           states (bool): when True, extra analysis is performed to categorize landfalls by U.S. state (default = False).
+           hours_over_water (int): minimum hours that a landfalling storm must be over water before another landfall is counted (default = 12).
+           start_year (int): lower bound of timeframe for storm data (default = 1979).
+           no_ET (bool): when True, restricts observed storms to include only organized tropical systems.
             
        Returns:
-           track_dat (pandas.DataFrame): track data converted to a DataFrame.
-           landfrac_points (pandas.DataFrame): grid of landfraction points according to model grid spacing.
-           landfrac_values (pandas.DataFrame): land fraction values from source.
+           storms (pandas.DataFrame): complete list of storms and all associated data
+           landfalls (pandas.DataFrame): list of landfalling storms and all associated data.
+           nonlandfalls (pandas.DataFrame): list of nonlandfalling storms and all associated data.
     '''
     
-    track_data, landfrac_points, landfrac_values = load_track_data(tracks=tracks,data_source=data_source,
-                                                                  flip_lon=flip_lon,calendar=calendar,start_year=start_year)
-    storms = interpolate.create_storm_list(track_data=track_data,landfrac_points=landfrac_points,landfrac_values=landfrac_values,
-                                           frequency=frequency,interval=interval,calendar=calendar)
+    track_data, landfrac_points, landfrac_values = load_track_data(tracks=tracks,data_source=data_source,flip_lon=flip_lon,
+                                                                   calendar=calendar,start_year=start_year,no_ET=no_ET)
+    storms = interpolate.create_storm_list(track_data=track_data,landfrac_points=landfrac_points,
+                                           landfrac_values=landfrac_values,frequency=frequency,
+                                           interval=interval,calendar=calendar)
     
     landfalls, nonlandfalls = find_landfalls(storms=storms,hours_over_water=hours_over_water)
     
@@ -39,13 +43,15 @@ def tc_list(tracks,data_source,interval,flip_lon=False,calendar='standard',
     
 
 
-def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
+def load_track_data(tracks,data_source,flip_lon,calendar,start_year,no_ET):
     ''' Using a track data file and a specified data source, formats data to work with Pyclogenesis.
         Parameters: 
             tracks (str): filepath of the storm track data to be processed.
             data_source (str): specification of where the data is coming from (options: 'obs','model','reanalysis').
             flip_lon (bool): when True, converts longitude from (0 to 360) degrees to (-90 to 90) degrees (default = False).
             calendar (str): specification of model calendar type (options: 'standard')
+            start_year (int): lower bound of timeframe for storm data (default = 1979).
+            no_ET (bool): when True, restricts observed storms to include only organized tropical systems.
             
         Returns:
             track_data (pandas.DataFrame): raw list of storm tracks
@@ -64,8 +70,15 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
     # Observational dataset
     if data_source == 'obs':
         # Read file
-        track_data = pd.read_csv(tracks, usecols = ['SID','ISO_TIME','LAT','LON','WMO_WIND','WMO_PRES'], 
+        track_data = pd.read_csv(tracks, usecols = ['SID','ISO_TIME','NATURE','LAT','LON','WMO_WIND','WMO_PRES'], 
                                  index_col=['SID','ISO_TIME'],parse_dates=True,low_memory=False)[1:]
+        
+        if no_ET:
+            # Filter out extratropical storms, disturbances, and unclassified storms
+            track_data = track_data[track_data.NATURE.isin(['TS','SS','DS'])]
+            
+        # Drop column with storm classifications    
+        track_data = track_data.drop(columns='NATURE')
         
         track_data['LAT']   = track_data['LAT'].copy().astype(float)
         track_data['LON']   = track_data['LON'].copy().astype(float)
@@ -124,25 +137,13 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
         
     # Model/reanalysis datasets
     elif data_source == 'model' or data_source == 'reanalysis':
-        # Model/reanalysis datasets
-        # Create unique 4-character strings for all storm IDs
-        alphabets = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 
-                     'h', 'i', 'j', 'k', 'l', 'm', 'n', 
-                     'o', 'p', 'q', 'r', 's', 't', 'u', 
-                     'v', 'w', 'x', 'y', 'z']
-
-        indices = []
-        for alpha1 in alphabets:
-            for alpha2 in alphabets:
-                for alpha3 in alphabets:
-                    for alpha4 in alphabets:
-                        indices.append(alpha1+alpha2+alpha3+alpha4)
-
         track_data = pd.DataFrame()
-
+        
+        start_idx = 0
         for track_file in os.listdir(tracks):
             if 'ipynb' in track_file:
                 continue
+                
             # Parse file into workable data
             td = open(tracks + track_file)
             lines = td.readlines()
@@ -150,14 +151,20 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
             lines_split = [l.replace('\n','').split('\t')for l in lines]
             # Find all start line indexes and append last line too
             lines_start = [i for i in range(0,len(lines_split)) if lines_split[i][0]=='start'] + [len(lines_split)] 
+            storm_length = list(np.diff(lines_start) - 1) # Minus one because start line would be included if not
 
-            storm_length = np.diff(lines_start) - 1 # Minus one because start line would be included if not
-
-            sid       = '{}{:02d}{:02d}{:02d}_{}'
-            storm_ids = [[sid.format(*list(np.array(lines_split[start][2:]).astype(int))+[ix])] * length 
-                             for start,length,ix in zip(lines_start[:-1],storm_length,indices[:len(lines_start)])]
-            gen_lons  = [[float(lines_split[start+1][3])] * length for start,length in zip(lines_start[:-1],storm_length)]
+            sid       = '{}{:02d}{:02d}{:02d}{}{}'
+            
+            # Go to lines_start[:-1] because last line is not a start line
+            gen_lons  = [[(float(lines_split[start+1][3]) + 180) % 360 - 180] * length for start,length in zip(lines_start[:-1],storm_length)]
             gen_lats  = [[float(lines_split[start+1][4])] * length for start,length in zip(lines_start[:-1],storm_length)]
+            
+            # Create strings for gen lons and lats for storm ID
+            gen_lon_str = [str(np.abs(int(gen_lon[0])))+'W' if (int(gen_lon[0]) < 0) else str(np.abs(int(gen_lon[0])))+'E' if (int(gen_lon[0]) > 0) else gen_lon[0] for gen_lon in gen_lons]
+            gen_lat_str = [str(np.abs(int(gen_lat[0])))+'S' if (int(gen_lat[0]) < 0) else str(np.abs(int(gen_lat[0])))+'N' if (int(gen_lat[0]) > 0) else gen_lat[0] for gen_lat in gen_lats]
+            
+            # Generate storm IDs by concatenating spatial and temporal information of storm genesis
+            storm_ids = [[sid.format(*list(np.array(lines_split[start][2:]).astype(int))+[gen_lat]+[gen_lon])] * length for start,length,gen_lat,gen_lon in zip(lines_start[:-1],storm_length,gen_lat_str,gen_lon_str)]
             
             # Adding ensemble ID information to dataframe
             if data_source == 'model':
@@ -165,7 +172,7 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
                 else: ensemble = [[track_file[-32:-24]] * length for length in storm_length]
             else: ensemble = [['REANALYSIS'] * length for length in storm_length]
 
-
+   
             # Create DataFrame from track file, skip header rows (those beginning with start)
             member_data = pd.read_table(tracks+track_file, skiprows=lines_start[:-1], usecols=([3,4,5,6,8,9,10,11]),
                                         delimiter = '\t', header=None, 
@@ -177,17 +184,13 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
             member_data['PRES']    = (member_data['PRES'].values)/100
             member_data['ENUM']    = flatten(ensemble)
             member_data            = member_data.set_index(['SID']).sort_index()
+            member_data            = member_data.reset_index()
+            
                     
-            storms = member_data.reset_index()
-
-            # Failsafe in case storms is a series object instead of a dataframe
-            if isinstance(storms,pd.Series):
-                storms = storms.to_frame().T
-                    
-            y = [int(storms.loc[time,'YYYY']) for time in storms.index]
-            m = [int(storms.loc[time,'MM']) for time in storms.index]
-            d = [int(storms.loc[time,'DD']) for time in storms.index]
-            h = [int(storms.loc[time,'HH']) for time in storms.index]
+            y = [int(member_data.loc[time,'YYYY']) for time in member_data.index]
+            m = [int(member_data.loc[time,'MM']) for time in member_data.index]
+            d = [int(member_data.loc[time,'DD']) for time in member_data.index]
+            h = [int(member_data.loc[time,'HH']) for time in member_data.index]
             
             if calendar == 'standard':
                 time = ['{}{:02d}{:02d}{:02d}'.format(year,month,day,hour) for year,month,day,hour in zip(y,m,d,h)]
@@ -214,10 +217,13 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
             # Truncate dataset to specified start time
             start = member_data.ISO_TIME.dt.year >= start_year
             member_data = member_data.loc[start]
-
+            
             track_data = pd.concat([track_data,member_data])
-            track_data = track_data.set_index(['ISO_TIME'],append=True)
+            # track_data = track_data.set_index(['ISO_TIME'],append=True)
 
+        track_data = track_data.set_index(['ENUM','SID','ISO_TIME'],append=True)
+        track_data = track_data.droplevel(0,axis=0)
+            
     # Convert lon/lat from 0/360 to -180/180 if flip_lon is set to True
     if flip_lon:
         track_data['LON'] = (track_data.LON.values + 180) % 360 - 180
@@ -234,22 +240,26 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year):
     track_data = track_data.sort_index()
     print("    Track data loaded!")
     
+    print(len(np.unique(track_data.index.get_level_values('SID'))))
     return track_data, landfrac_points, landfrac_values
 
 
 
 def flatten(l):
-    return [item for sublist in l for item in sublist]    
+    return [item for sublist in l for item in sublist]     
 
 
-def find_landfalls(storms,hours_over_water=12,states=False,region='GL',threshold=0.5):
+
+def find_landfalls(storms,hours_over_water=12,enums=None,region='GL',landfrac_thresh=0.5,lat_thresh=45.0):
     ''' Creates a list of landfalling and non-landfalling storms.
         Parameters: 
             storms (pandas.DataFrame): complete, interpolated storm track data.
             hours_over_water (int): minimum number of hours that a landfalling storm must be over water before another landfall is counted.
-            states (bool): when True, extra analysis is performed to categorize landfalls by U.S. state.
+            enums (str arr):
             region (str):
-            threshold (float):
+            landfrac_thresh (float):
+            lat_thresh (float):
+            
             
         Returns:
             landfalls (pandas.DataFrame): complete list of landfalling storms.
@@ -258,80 +268,54 @@ def find_landfalls(storms,hours_over_water=12,states=False,region='GL',threshold
             
     '''
     print("    Generating landfalling/non-landfalling storm lists...")
-    
-    # Read in US state shapefiles
-    # MODIFY FILEPATH ACCORDING TO WHERE YOU STORE YOUR DATA
-    if states:
-        US_states = shpreader.Reader("/glade/work/abolivar/Pyclogenesis_data/cb_2018_us_state_500k/cb_2018_us_state_500k.shp")
-        states_records = US_states.records()
-        lst = []
-
-        for state in states_records:
-            record = pd.DataFrame.from_dict([state.attributes])
-            try:
-                geoms = []
-                for geom in state.geoemtry.geoms:
-                    geoms.append(geom)
-                record['geometry'] = [geoms]
-            except:
-                record['geometry'] = [state.geometry]
-
-            lst.append(record.set_index(['STUSPS','NAME']))
-
-        state_df = pd.concat(lst)
-   
 
     landings_list = []
     nonlandings_list = []
     
-    for sid in np.unique(storms.index.get_level_values('SID')): # Iterate through SIDs
-        storm_df = storms.xs(sid,level='SID')
-        ensemble = storm_df.index.get_level_values('ENUM')[0]
-        
-        in_region = util.region_bounds(region,storm_df.GEN_LON.values[0],storm_df.GEN_LAT.values[0])
-        
-        if in_region[0] == True:
-            # Check if storm makes landfall
-            if (storm_df.LANDFRAC > threshold).any():    
-                for itime,time in enumerate(storm_df.index.get_level_values('ISO_TIME').values):
-                    if (storm_df.loc[(ensemble,time),'LANDFRAC'] > threshold).all():  # Check if landfrac value is greater than 0.5...
+    # If enums is not user-specified, use all enums in the storm DataFrame
+    if enums == None:
+        enums = np.unique(storms.index.get_level_values('ENUM'))
+    
+    for enum in enums:
+        enum_df = storms.xs(enum,level='ENUM',drop_level=False)
+        sids = np.unique(enum_df.index.get_level_values('SID'))
+        for sid in sids: # Iterate through SIDs
+            storm_df = enum_df.xs(sid,level='SID',drop_level=False)
+            
+            extratropical = False
+            landfall = False
+            
+            times = storm_df.index.get_level_values('ISO_TIME').values
+            if (storm_df.LANDFRAC > landfrac_thresh).any():
+                for itime in range(len(times)): # For all times and time indices in storm_df...
+                    if (storm_df.iloc[itime].LANDFRAC > landfrac_thresh):  # Check if landfrac value is greater than 0.5...
                         # Check if it has been at least X many hours since last landfrac == 1, where X = hours_over water...
                         if itime >= hours_over_water:
-                            if (storm_df.iloc[itime-hours_over_water:itime]['LANDFRAC'] <= threshold).all():
-                                # Append to landfall list if all of the above conditions are met
-                                landings_list.append(storms.loc[[(ensemble,sid,time)]])
-                                
+                            if (storm_df.iloc[itime-hours_over_water:itime].LANDFRAC <= landfrac_thresh).all():
+                                storm_time = storm_df.iloc[itime]
+                                lat = storm_time.LAT
+                                # Append landfall if it falls within the lon/lat bounds
+                                if np.abs(lat) <= lat_thresh:
+                                    landings_list.append(storm_df.iloc[[itime]])
+                                    landfall = True
+                                # Append as nonlandfall if it fails the above check
+                                else:
+                                    extratropical = True
+                                    break
+
                         # Alternative check for storms that make landfall at less than X hours old, where X = hours_over water...
                         else:
-                            if (itime > 0) and (storm_df.iloc[0:itime]['LANDFRAC'] <= threshold).all():
-                                landings_list.append(storms.loc[[(ensemble,sid,time)]])
+                            if (itime > 0) and (storm_df.iloc[0:itime].LANDFRAC <= 0.5).all():
+                                landings_list.append(storm_df.iloc[[itime]])
                                 
-            # If the storm did not make landfall, append the lysis point to rhe non-landfall dataframe                   
+                if extratropical and not landfall:
+                    nonlandings_list.append(storm_df.iloc[[itime]])
+
             else:
-                time = storm_df.iloc[-1:].index.get_level_values('ISO_TIME').values[0]
-                nonlandings_list.append(storms.loc[[(ensemble,sid,time)]])
-                
+                nonlandings_list.append(storm_df.iloc[[len(times)-1]])
+
     landfalls = pd.concat(landings_list,axis=0)
-    
     nonlandfalls = pd.concat(nonlandings_list,axis=0)
-        
-    # Categorize landfalls by state using shapefiles
-    if states == True:
-        landing_states_list = []
-    
-        for landing in landings.index:
-            landing_copy = landings.loc[landing]
-            land_point = shp_geom.Point(landing_copy['LON'],landing_copy['LAT'])
-
-            for state in state_df.index:
-                if state_df.loc[state,'geometry'].contains(land_point):
-                    landing_state_abbrev = state[0]
-                    landing_copy['Location'] = landing_state_abbrev
-                    landing_states_list.append(landing_copy)
-
-        landfalls_states = pd.concat(landing_states_list,axis=1).T
-        
-        return landfalls, landfalls_states, nonlandfalls
     
     print('        Landfalling/non-landfalling storm lists generated!')
     

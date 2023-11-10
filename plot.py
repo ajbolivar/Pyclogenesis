@@ -6,11 +6,10 @@ import xarray as xr
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
-import cartopy.io.shapereader as shpreader
 import os
-import shapely.geometry as shp_geom
+from shapely.geometry import Point
+from shapely.geometry.polygon import Polygon
 from Pyclogenesis import util
-
 
 def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_speed',
                     scattercolor='blue',linecolor='gainsboro',linewidth=0.25,legend=False,
@@ -110,152 +109,263 @@ def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_s
     if len(storm_numbers) == 1:
         return storm_number_id
 
-    
-def gen_to_lf(ax,bounds,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
-              gen_color_lf='blue',lf_color='limegreen',gen_color_nlf='yellow',nlf_color='red',
-              lf_edge='black',nlf_edge='black',gen_edge='black',lw=0.5,a=1):
+def categorize_landfall(landfall,plot_type):
+    # Landfall regions
+    gc    = Polygon([(-98,17), (-98,33), (-82,33), (-81,25), (-90,25), (-90,17)])
+    se    = Polygon([(-83,24), (-83,25), (-81,25), (-82,33.5), (-80.5,36.5), 
+                     (-74.5,36.5), (-74.5,27), (-79.5,27), (-79.5,25), (-80,24)])
+    ne    = Polygon([(-78,36.5), (-78,45), (-66.5,45), (-66.5,36.5)])
+    ci_ca = Polygon([(-90.,15), (-90,24), (-79.5,24), (-79.5,27), (-74.5,27), 
+                     (-58.5,19.5), (-58.5,11), (-85,11)])
 
+    lf_regions = [gc,se,ne,ci_ca]
+    lf_facecolors = ['darkred','mediumblue','rebeccapurple','saddlebrown']
+    lf_edgecolors = ['red','deepskyblue','darkviolet','darkorange']
+
+    
+    # Genesis regions
+    mdr = Polygon([(-60,10), (-60,20), (-15,20), (-15,10)])
+    ws  = Polygon([(-81.5,25), (-81.5, 47), (-43,47), (-43,25)])
+    gm  = Polygon([(-98,17), (-98,31), (-81.5,31), (-81.5,25), (-93,17)])
+    cs  = Polygon([(-93,17), (-81.5,25), (-60,25), (-60,10), (-83,10)])
+    
+    # NATL basin
+    natl = Polygon([(-85,11),(-90,17),(-98,17),(-98,45),(-15,45),(-15,10)])
+    
+    if plot_type == 'gen_to_lf':
+        genesis_point = Point(landfall.GEN_LON,landfall.GEN_LAT)
+        if mdr.contains(genesis_point): return 'mediumvioletred','deeppink'
+        elif ws.contains(genesis_point): return 'darkblue','dodgerblue'
+        elif gm.contains(genesis_point): return 'darkgreen','limegreen'
+        elif cs.contains(genesis_point): return 'darkgoldenrod','gold'
+        elif natl.contains(genesis_point): return 'darkgray','gainsboro'
+        else: return 'none','none'
+             
+    if plot_type == 'lf_to_gen':
+        landfall_point = Point(landfall.LON,landfall.LAT)
+        if gc.contains(landfall_point): return 'darkred','red'
+        elif se.contains(landfall_point): return 'mediumblue','deepskyblue'
+        elif ne.contains(landfall_point): return 'rebeccapurple','darkviolet'
+        elif ci_ca.contains(landfall_point): return 'saddlebrown','darkorange'
+        elif natl.contains(landfall_point): return 'darkgray','gainsboro'
+        else: return 'none','none'
+        
+    
+def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,lw=0.5,a=1,div=4):
     ''' Plots scatter points based on a user-defined storm genesis region.
     Parameters: 
         ax (arr):
+        storms (pandas.DataFrame)
         landfalls (pandas.DataFrame):
         nonlandfalls (pandas.DataFrame)
-        gen_south (float):
-        gen_north (float):
-        gen_west (float):
-        gen_east (float):
-        size (float):
-        gen_color_lf (str):
-        landfall_color (str):
-        gen_color_nlf (str):
-        nonlandfall_color (str)
-        edgecolor(str):
-        linewidth (float):
+        lf (bool):
+        nlf (bool):
+        s (float):
+        lw (float):
+        a (float):
+        div (int)
     Returns:
         None
     '''
-    
-    try:
-        if lf:
-            for sid in landfalls.index.get_level_values('SID'):
-                storm_df = landfalls.xs(sid,level='SID')
-                GEN_LAT  = storm_df.GEN_LAT.values[0]
-                GEN_LON  = storm_df.GEN_LON.values[0]
-                
-                # MDR: 10-20N, 80-20W
-                gen_W,gen_E,gen_S,gen_N = bounds[0],bounds[1],bounds[2],bounds[3]
-                
-                lat_check = (GEN_LAT>gen_S) & (GEN_LAT<gen_N)
-                lon_check = (GEN_LON>gen_W) & (GEN_LON<gen_E)
 
-                if lat_check & lon_check:
-                    # Plot genesis point
-                    ax.scatter(GEN_LON,GEN_LAT,s=s,facecolor=gen_color_lf,edgecolor=gen_edge,
-                               zorder=5,linewidths=lw,alpha=a)
-                    # Plot landfall point
-                    ax.scatter(storm_df.LON.values,storm_df.LAT.values,s=s,facecolor=lf_color,
-                               edgecolor=lf_edge,zorder=5,linewidths=lw,alpha=a)
+    if lf:
+        lf_inds = range(len(landfalls))
+        # Find average number of landfalls per ensemble member
+        try:
+            avg_num_lf = int(np.round((len(lf_inds)/len(np.unique(landfalls.index.get_level_values('ENUM'))))/div,0))
+        except:
+            avg_num_lf = len(lf_inds)
+
+        # Randomly subset landfalls to plot based on avg_num_lf   
+        random_subset = np.random.choice(lf_inds,avg_num_lf,replace=False)
+        temp_df = []
+            
+        for i in random_subset:
+            # Extract landfall/storm data from parent dataframes
+            temp_df.append(landfalls.iloc[[i]])
         
-        if nlf:
-            for sid in nonlandfalls.index.get_level_values('SID'):
-
-                storm_df = nonlandfalls.xs(sid,level='SID')
-                GEN_LAT  = storm_df.GEN_LAT.values[0]
-                GEN_LON  = storm_df.GEN_LON.values[0]
-
-                # MDR: 10-20N, 80-20W
-                gen_W,gen_E,gen_S,gen_N = bounds[0],bounds[1],bounds[2],bounds[3]
+        landfalls = pd.concat(temp_df)
+            
+        for enum in np.unique(landfalls.index.get_level_values('ENUM')):
+            ens_lfs = (landfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            ens_stms = (storms.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            
+            for index,lf in ens_lfs.iterrows():
+                sid = lf.SID
+                storm_df = ens_stms[ens_stms.SID == sid]
                 
-                lat_check = (GEN_LAT>gen_S) & (GEN_LAT<gen_N)
-                lon_check = (GEN_LON>gen_W) & (GEN_LON<gen_E)
+                # Make landfall data into a tuple
+                lf_tuple = tuple(lf)
+                
+                # Find index in storm_df corresponding to landfall
+                lf_index = (storm_df[storm_df.apply(tuple, axis=1) == lf_tuple]).index.to_list()[0]
 
-                if lat_check & lon_check:
-                    # Plot genesis point
-                    ax.scatter(GEN_LON,GEN_LAT,s=s,facecolor=gen_color_nlf,edgecolor=gen_edge,
-                               zorder=5,linewidths=lw,alpha=a)
-                    # Plot lysis point
-                    ax.scatter(storm_df.LON.values,storm_df.LAT.values,s=s,facecolor=nlf_color,
-                               edgecolor=nlf_edge,zorder=5,linewidths=lw,alpha=a,marker='X')
-    
-    # If no points within given bounds are detected
-    except:
-        print('Model has no storm genesis points in the defined region.')
-        return
+                # Crop the storm_df dataframe using this index
+                cropped_storm_df = storm_df.loc[:lf_index]
+                facecolor, edgecolor = categorize_landfall(lf,plot_type='gen_to_lf')
+                    
+                # Plot genesis point
+                ax.scatter(lf.LON,lf.LAT,s=s,facecolor=facecolor,
+                           edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
+                # Plot storm track
+                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
 
             
-def lf_to_gen(ax,bounds,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
-              gen_color_lf='blue',lf_color='limegreen',gen_color_nlf='yellow',nlf_color='red',
-              lf_edge='black',nlf_edge='black',gen_edge='black',lw=0.5,a=1):
+        
+    if nlf:
+        nlf_inds = range(len(nonlandfalls))
+        # Find average number of nonlandfalls per ensemble member
+        try:
+            avg_num_nlf = int(np.round((len(nlf_inds)/len(np.unique(nonlandfalls.index.get_level_values('ENUM'))))/div,0))
+        except:
+            avg_num_nlf = len(lf_inds)
+
+        # Randomly subset nonlandfalls to plot based on avg_num_lf   
+        random_subset = np.random.choice(nlf_inds,avg_num_nlf,replace=False)
+        temp_df = []
+            
+        for i in random_subset:
+            # Extract nonlandfall data from parent dataframe
+            temp_df.append(nonlandfalls.iloc[[i]])
+                
+        nonlandfalls = pd.concat(temp_df)
+        for enum in np.unique(nonlandfalls.index.get_level_values('ENUM')):
+            ens_nlfs = (nonlandfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            ens_stms = (storms.xs(enum,level='ENUM',drop_level=False)).reset_index()
+                
+            for index,nlf in ens_nlfs.iterrows():
+                sid = nlf.SID
+                storm_df = ens_stms[ens_stms.SID == sid]
+                
+                # Make landfall data into a tuple
+                nlf_tuple = tuple(nlf)
+                
+                # Find index in storm_df corresponding to landfall
+                nlf_index = (storm_df[storm_df.apply(tuple, axis=1) == nlf_tuple]).index.to_list()[0]
+
+                # Crop the storm_df dataframe using this index
+                cropped_storm_df = storm_df.loc[:nlf_index]
+                facecolor, edgecolor = categorize_landfall(nlf,plot_type='gen_to_lf')
+                    
+                # Plot lysis point
+                ax.scatter(nlf.LON,nlf.LAT,s=s,facecolor=facecolor,marker='X',
+                           edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
+                # Plot storm track
+                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
+
+            
+def lf_to_gen(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,lw=0.5,a=1,div=4):
     ''' Plots scatter points based on a user-defined storm landfall region.
     Parameters: 
         ax (arr):
+        storms (pandas.DataFrame)
         landfalls (pandas.DataFrame):
-        nonlandfalls (pandas.DataFrame):
-        bounds (float): bounds of region box (lonW, lonE, latS, latN: lon range from -180 to 180, lat range from -90 to 90)
-        size (float): size of scatter point
-        gen_color_lf (str): color of genesis point of landfalling storm
-        landfall_color (str): color of landfall point
-        gen_color_nlf (str): color of genesis point of storm that does not make landfall
-        nonlandfall_color (str): color of cyclolysis point over water
-        edgecolor(str): color of scatter point edge
-        linewidth (float): width of scatter point edge
+        nonlandfalls (pandas.DataFrame)
+        lf (bool):
+        nlf (bool):
+        s (float):
+        lw (float):
+        a (float):
+        div (int)
     Returns:
         None
     '''
     
-    try:
-        if lf:
-            for sid in landfalls.index.get_level_values('SID'):
-                storm_df = landfalls.xs(sid,level='SID')
-                LF_LAT  = storm_df.LAT.values[0]
-                LF_LON  = storm_df.LON.values[0]
-                
-                lf_W,lf_E,lf_S,lf_N = bounds[0],bounds[1],bounds[2],bounds[3]
+    # try:
+    if lf:
+        lf_inds = range(len(landfalls))
+        # Find average number of landfalls per ensemble member
+        try:
+            avg_num_lf = int(np.round((len(lf_inds)/len(np.unique(landfalls.index.get_level_values('ENUM'))))/div,0))
+        except:
+            avg_num_lf = len(lf_inds)
 
-                lat_check = (LF_LAT>lf_S) & (LF_LAT<lf_N)
-                lon_check = (LF_LON>lf_W) & (LF_LON<lf_E)
-                
-                if lat_check & lon_check:
-                    # Plot genesis point
-                    ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=s,facecolor=gen_color_lf,
-                               edgecolor=gen_edge,zorder=5,linewidths=lw,alpha=a)
-                    # Plot landfall point
-                    ax.scatter(LF_LON,LF_LAT,s=s,facecolor=lf_color,edgecolor=lf_edge,
-                               zorder=5,linewidths=lw,alpha=a)
+        # Randomly subset landfalls to plot based on avg_num_lf   
+        random_subset = np.random.choice(lf_inds,avg_num_lf,replace=False)
+        temp_df = []
+            
+        for i in random_subset:
+            # Extract landfall/storm data from parent dataframes
+            temp_df.append(landfalls.iloc[[i]])
         
-        if nlf:
-            for sid in nonlandfalls.index.get_level_values('SID'):
-                storm_df = nonlandfalls.xs(sid,level='SID')
-                NLF_LAT  = storm_df.LAT.values[0]
-                NLF_LON  = storm_df.LON.values[0]
-
-                # MDR: 10-20N, 80-20W
-                nlf_W,nlf_E,nlf_S,nlf_N = bounds[0],bounds[1],bounds[2],bounds[3]
+        landfalls = pd.concat(temp_df)
+            
+        for enum in np.unique(landfalls.index.get_level_values('ENUM')):
+            ens_lfs = (landfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            ens_stms = (storms.xs(enum,level='ENUM',drop_level=False)).reset_index()
                 
-                lat_check = (NLF_LAT>nlf_S) & (NLF_LAT<nlf_N)
-                lon_check = (NLF_LON>nlf_W) & (NLF_LON<nlf_E)
+            for index,lf in ens_lfs.iterrows():
+                sid = lf.SID
+                storm_df = ens_stms[ens_stms.SID == sid]
+                
+                # Make landfall data into a tuple
+                lf_tuple = tuple(lf)
+                
+                # Find index in storm_df corresponding to landfall
+                lf_index = (storm_df[storm_df.apply(tuple, axis=1) == lf_tuple]).index.to_list()[0]
 
-                if lat_check & lon_check:
-                    # Plot genesis point
-                    ax.scatter(storm_df.GEN_LON.values,storm_df.GEN_LAT.values,s=s,facecolor=gen_color_nlf,
-                               edgecolor=gen_edge,zorder=5,linewidths=lw,alpha=a)
-                    # Plot lysis point
-                    ax.scatter(NLF_LON,NLF_LAT,s=s,facecolor=nlf_color,edgecolor=nlf_edge,
-                               zorder=5,linewidths=lw,alpha=a,marker='X')
+                # Crop the storm_df dataframe using this index
+                cropped_storm_df = storm_df.loc[:lf_index]
+                facecolor, edgecolor = categorize_landfall(lf,plot_type='lf_to_gen')
                     
-    
-    # If no points within given bounds are detected
-    except:
-        print('Model has no storm landfall points in the defined region.')
-        return
+                # Plot genesis point
+                ax.scatter(lf.GEN_LON,lf.GEN_LAT,s=s,facecolor=facecolor,
+                           edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
+                # Plot storm track
+                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
 
-def track_density(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap='inferno'):
-    ''' Plots a 2D histogram displaying track density
+                   
+
+    if nlf:
+        nlf_inds = range(len(nonlandfalls))
+            
+        # Find average number of nonlandfalls per ensemble member
+        try:
+            avg_num_nlf = int(np.round((len(nlf_inds)/len(np.unique(nonlandfalls.index.get_level_values('ENUM'))))/div,0))
+        except:
+            avg_num_nlf = len(lf_inds)
+
+        # Randomly subset nonlandfalls to plot based on avg_num_lf   
+        random_subset = np.random.choice(nlf_inds,avg_num_nlf,replace=False)
+
+        temp_df = []
+            
+        for i in random_subset:
+            # Extract nonlandfall data from parent dataframe
+            temp_df.append(nonlandfalls.iloc[[i]])
+                
+        nonlandfalls = pd.concat(temp_df)
+            
+        for enum in np.unique(nonlandfalls.index.get_level_values('ENUM')):
+            ens_nlfs = (nonlandfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            ens_stms = (storms.xs(enum,level='ENUM',drop_level=False)).reset_index()  
+            
+            for index,nlf in ens_nlfs.iterrows():
+                sid = nlf.SID
+                storm_df = ens_stms[ens_stms.SID == sid]
+                
+                # Make landfall data into a tuple
+                nlf_tuple = tuple(nlf)
+                
+                # Find index in storm_df corresponding to landfall
+                nlf_index = (storm_df[storm_df.apply(tuple, axis=1) == nlf_tuple]).index.to_list()[0]
+
+                # Crop the storm_df dataframe using this index
+                cropped_storm_df = storm_df.loc[:nlf_index]
+                facecolor, edgecolor = categorize_landfall(nlf,plot_type='lf_to_gen')
+                    
+                # Plot lysis point
+                ax.scatter(nlf.GEN_LON,nlf.GEN_LAT,s=s,facecolor=facecolor,marker='X',
+                           edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
+                # Plot storm track
+                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
+                
+                
+def track_density(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4))):
+    ''' Creates a 2D track density histogram
     Parameters: 
-        ax (arr):
         storms (pandas.DataFrame):
         bins (int or arr)):
-        cmap (str):
     Returns:
         plot:
     '''
@@ -263,31 +373,30 @@ def track_density(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4)),cmap='inf
     return h, x, y
 
 def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,vmax=1010,
-                            scale=1,edgecolor='k',linewidth=0.25,alpha=0.6):
+                       scale=1,edgecolor='k',linewidth=0.25,alpha=0.6,intensity_metric='pressure',
+                       nan_value=0):
     ''' Plots landfall points in a euclidean space relative to their genesis location centered at (0,0). 
         Storm duration is shown by scatter point size and intensity is shown by a colormap.
         Parameters: 
             ax (arr):
             storms (pandas.DataFrame):
             landfalls (pandas.DataFrame):
-            cmap (str):
-            vmin (str):
-            vmax (float):
-            edgecolor (str):
-            linewidth (float):
-            alpha (float):
+            cmap (str): colormap name.
+            vmin (str): minimum value for colormap.
+            vmax (float): maximum value for colormap.
+            edgecolor (str): color of scatter point edge.
+            linewidth (float): width of scatter point edge.
+            alpha (float): transparency of scatter point (1 for opaque, 0 for transparent).
+            intensity_metric (string): metric used to represent storm intensity (options: 'wind','pressure'; default = 'pressure')
             
         Returns:
             pm ():
+            count (int):
     '''
     
     xdiffs = []
     ydiffs = []
-    xdiffsna = []
-    ydiffsna = []
-    
     life = []
-    lifena = []
     intensity = []
     
     # Subset landfalls by region
@@ -311,24 +420,27 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
         gen_lon = storm_df.GEN_LON[0]
         gen_lat = storm_df.GEN_LAT[0]
         
-        # Check for missing pressure information, plot seperately
-        if storm_df.PRES.isna().all():
-            xdiffsna.append(*(landfall_df.LON.values-landfall_df.GEN_LON.values))
-            ydiffsna.append(*(landfall_df.LAT.values-landfall_df.GEN_LAT.values))
-            
-            # Calculate storm lifetime
-            dates = np.unique(storm_df.index.get_level_values('ISO_TIME').date)
-            lifena.append(len(dates))
+        xdiffs.append(*(landfall_df.LON.values-landfall_df.GEN_LON.values))
+        ydiffs.append(*(landfall_df.LAT.values-landfall_df.GEN_LAT.values))
         
-        # 
-        else:
-            xdiffs.append(*(landfall_df.LON.values-landfall_df.GEN_LON.values))
-            ydiffs.append(*(landfall_df.LAT.values-landfall_df.GEN_LAT.values))
-            
-            # Calculate storm lifetime
-            dates = np.unique(storm_df.index.get_level_values('ISO_TIME').date)
-            life.append(len(dates))
-            intensity.append(landfall_df.PRES.values[0])
+        # Calculate storm lifetime
+        dates = np.unique(storm_df.index.get_level_values('ISO_TIME').date)
+        life.append(len(dates))
+        
+        if intensity_metric == 'pressure':
+            # If pressure data is missing, convert wind to pressure
+            if (storm_df.PRES == nan_value).all():
+                # Coefficients for wind-pressure quadratic relationship
+                a,b,c = -8.06310272e-03, -7.83002512e-01,  1.02042887e+03
+                lf_wind = landfall_df.WIND.values[0]
+                wind_derived_pressure = a*(lf_wind)**2 + b*(lf_wind) + c
+                intensity.append(wind_derived_pressure)
+
+            else:
+                intensity.append(landfall_df.PRES.values[0])
+                
+        elif intensity_metric == 'wind':
+            intensity.append(landfall_df.WIND.values[0])
 
     
     xdiffs_all = []
@@ -356,10 +468,10 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
         elif (coord[0] < 0) & (coord[1] < 0): count[2] +=1
         else: count[3] +=1
     
+    point_size = [20*l for l in life]
+    
     pm = ax.scatter(xdiffs,ydiffs,s=np.multiply(life,scale),edgecolor=edgecolor,linewidth=linewidth,
                     c=intensity,cmap=cmap,vmin=vmin,vmax=vmax,alpha=alpha)
-    ax.scatter(xdiffsna,ydiffsna,s=np.multiply(lifena,scale),edgecolor=edgecolor,linewidth=linewidth,
-               facecolor='gainsboro',alpha=alpha)
     
     ax.axhline(0,color='k',alpha=0.5,linewidth=0.5,linestyle='--')
     ax.axvline(0,color='k',alpha=0.5,linewidth=0.5,linestyle='--')
@@ -399,16 +511,15 @@ def temporal_lf(ax,landfalls,label,size=5,lw=0.25,color='red',edgecolor='black',
         landfalls (pandas.DataFrame):
         size (float):
         lw (float):
-        pre_col (str):
-        early_col (str):
-        peak_col (str):
-        post_col (str):
+        color (str)
         edgecolor (str):
+        months (int arr):
+        a (float):
+        marker (str):
     Returns:
         None
     '''
     
-    # Pre-season: March, April, May
     lf = landfalls[(landfalls.index.get_level_values('ISO_TIME')).month.isin(months)]
     
     ax.scatter(lf.LON,lf.LAT,c=color,edgecolor=edgecolor,linewidth=lw,s=size,zorder=2,label=label,alpha=a,marker=marker)
@@ -438,28 +549,28 @@ def mappy(ax,extent=[-100,-10,10,60],lat_interval=15,lon_interval=30,crs=ccrs.Pl
     lonW, lonE, latS, latN = extent[0], extent[1], extent[2], extent[3]
 
     # Add lat/lon ticks
-    ax.set_yticks(np.arange(latS,latN+lat_interval,lat_interval), crs=crs, minor=False)
-    ax.set_yticks(np.arange(latS,latN+lat_interval,lat_interval/2), crs=crs, minor=True)
+    ax.set_yticks(np.arange(latS+lat_interval,latN,lat_interval), crs=crs, minor=False)
+    ax.set_yticks(np.arange(latS,latN+lat_interval,lat_interval*2), crs=crs, minor=True)
     
-    ax.set_xticks(np.arange(lonW,lonE+lon_interval,lon_interval), crs=crs, minor=False)
-    ax.set_xticks(np.arange(lonW,lonE+lon_interval,lon_interval/2), crs=crs, minor=True)
+    ax.set_xticks(np.arange(lonW+lon_interval,lonE,lon_interval), crs=crs, minor=False)
+    ax.set_xticks(np.arange(lonW,lonE+lon_interval,lon_interval*2), crs=crs, minor=True)
     
-    lon_labels = np.arange(lonW,(lonE+lon_interval),lon_interval)
-    lat_labels = np.arange(latS,(latN+lat_interval),lat_interval)
+    lon_labels = np.arange(lonW+lon_interval,(lonE),lon_interval)
+    lat_labels = np.arange(latS+lat_interval,(latN),lat_interval)
     
     ax.set_xticklabels(lon_labels,fontsize=fontsize)
     ax.set_yticklabels(lat_labels,fontsize=fontsize)
     
-    lon_formatter = LongitudeFormatter(zero_direction_label=True,number_format='.1f')
-    lat_formatter = LatitudeFormatter(number_format='.1f')
+    lon_formatter = LongitudeFormatter(zero_direction_label=True,number_format='.0f')
+    lat_formatter = LatitudeFormatter(number_format='.0f')
     ax.xaxis.set_major_formatter(lon_formatter)
     ax.yaxis.set_major_formatter(lat_formatter)
     
     ax.set_extent(extent,crs=ccrs.PlateCarree())
     
-    ax.add_feature(cfeature.LAND.with_scale('10m'),facecolor=land_color,edgecolor=borders,linewidth=0.25)
-    ax.add_feature(cfeature.OCEAN.with_scale('10m'),facecolor=ocean_color,edgecolor=borders,linewidth=0.25)
-    ax.add_feature(cfeature.BORDERS,facecolor='none',edgecolor=borders,linewidth=.25)
-    ax.add_feature(cfeature.COASTLINE,facecolor='none',edgecolor=borders,linewidth=.25)
-    ax.add_feature(cfeature.STATES,facecolor=states_color,edgecolor=state_borders,linewidth=.25)
-    ax.add_feature(cfeature.LAKES.with_scale('110m'),edgecolor=borders,facecolor=ocean_color,linewidth=.25)
+    ax.add_feature(cfeature.LAND.with_scale('10m'),facecolor=land_color,edgecolor=borders,linewidth=0.2)
+    ax.add_feature(cfeature.OCEAN.with_scale('10m'),facecolor=ocean_color,edgecolor=borders,linewidth=0.2)
+    ax.add_feature(cfeature.BORDERS,facecolor='none',edgecolor=borders,linewidth=.2)
+    ax.add_feature(cfeature.COASTLINE,facecolor='none',edgecolor=borders,linewidth=.2)
+    ax.add_feature(cfeature.STATES,facecolor=states_color,edgecolor=state_borders,linewidth=.2)
+    ax.add_feature(cfeature.LAKES.with_scale('110m'),edgecolor=borders,facecolor=ocean_color,linewidth=.2)
