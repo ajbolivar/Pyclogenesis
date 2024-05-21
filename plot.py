@@ -1,3 +1,5 @@
+import os
+import math
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -6,7 +8,6 @@ import xarray as xr
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 from cartopy.mpl.ticker import LongitudeFormatter, LatitudeFormatter
-import os
 from shapely.geometry import Point
 from shapely.geometry.polygon import Polygon
 from Pyclogenesis import util
@@ -18,7 +19,7 @@ def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_s
         Parameters: 
 	    ax (int arr): axis to draw plot on.
 	    storm_numbers (int arr): number of storm tracks to plot (if all, specify length)
-            landfalls (pandas.DataFrame):
+        landfalls (pandas.DataFrame):
 	    size (float):
 	    plot_type (str):
 	    scattercolor (str):
@@ -99,7 +100,6 @@ def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_s
 
             if len(storms) < 5:
                 print("Storm {} made landfall at the following locations:".format(storm_number_id))
-                print(storm_landings)
                 
         else:
             if len(storms) < 5:
@@ -110,13 +110,17 @@ def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_s
         return storm_number_id
 
 def categorize_landfall(landfall,plot_type):
+    # NATL basin
+    natl = Polygon([(-83,10),(-93,17),(-98,17),(-98,45),(-15,45),(-15,10)])
     # Landfall regions
-    gc    = Polygon([(-98,17), (-98,33), (-82,33), (-81,25), (-90,25), (-90,17)])
-    se    = Polygon([(-83,24), (-83,25), (-81,25), (-82,33.5), (-80.5,36.5), 
-                     (-74.5,36.5), (-74.5,27), (-79.5,27), (-79.5,25), (-80,24)])
-    ne    = Polygon([(-78,36.5), (-78,45), (-66.5,45), (-66.5,36.5)])
-    ci_ca = Polygon([(-90.,15), (-90,24), (-79.5,24), (-79.5,27), (-74.5,27), 
-                     (-58.5,19.5), (-58.5,11), (-85,11)])
+    gc = Polygon([(-98, 17), (-98, 33), (-82, 33), (-81, 25), 
+              (-83, 25), (-83, 24), (-90, 24), (-90, 17)]) # Gulf Coast
+    se = Polygon([(-83, 24), (-83, 25), (-81, 25), (-82, 33.5), 
+                  (-80.5, 36.5), (-74.5, 36.5), (-74.5, 27), 
+                  (-79.5, 27), (-79.5, 25), (-80, 24)])
+    ne = Polygon([(-78, 36.5), (-78, 48), (-59, 48), (-59, 36.5)])
+    ci_ca = Polygon([(-90., 15), (-90., 24), (-79.5, 24), (-79.5, 27), 
+                     (-74.5, 27), (-58.5, 19.5), (-58.5, 11), (-85, 11)])
 
     lf_regions = [gc,se,ne,ci_ca]
     lf_facecolors = ['darkred','mediumblue','rebeccapurple','saddlebrown']
@@ -125,9 +129,9 @@ def categorize_landfall(landfall,plot_type):
     
     # Genesis regions
     mdr = Polygon([(-60,10), (-60,20), (-15,20), (-15,10)])
-    ws  = Polygon([(-81.5,25), (-81.5, 47), (-43,47), (-43,25)])
-    gm  = Polygon([(-98,17), (-98,31), (-81.5,31), (-81.5,25), (-93,17)])
-    cs  = Polygon([(-93,17), (-81.5,25), (-60,25), (-60,10), (-83,10)])
+    ws = Polygon([(-81.5,25), (-81.5, 45), (-43,45), (-43,20), (-60,20)])
+    gm = Polygon([(-98,17), (-98,31), (-81.5,31), (-81.5,25), (-93,17)])
+    cs = Polygon([(-93,17), (-81.5,25), (-60,20), (-60,10), (-83,10)])
     
     # NATL basin
     natl = Polygon([(-85,11),(-90,17),(-98,17),(-98,45),(-15,45),(-15,10)])
@@ -312,7 +316,8 @@ def lf_to_gen(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
                 ax.scatter(lf.GEN_LON,lf.GEN_LAT,s=s,facecolor=facecolor,
                            edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
                 # Plot storm track
-                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
+                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,
+                        color=edgecolor,zorder=-1)
 
                    
 
@@ -372,7 +377,8 @@ def track_density(storms,bins=(np.arange(-120,0,4), np.arange(0,70,4))):
     h,x,y = np.histogram2d(storms.LON.values,storms.LAT.values,bins=bins)
     return h, x, y
 
-def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,vmax=1010,
+
+def intensity_duration(ax,storms,landfalls,num_lf=None,cmap='inferno',region='GL',vmin=900,vmax=1010,
                        scale=1,edgecolor='k',linewidth=0.25,alpha=0.6,intensity_metric='pressure',
                        nan_value=0):
     ''' Plots landfall points in a euclidean space relative to their genesis location centered at (0,0). 
@@ -408,6 +414,9 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
         avg_num_lf = int(np.round(len(lf_inds)/len(np.unique(landfalls.index.get_level_values('ENUM'))),0))
     except:
         avg_num_lf = len(lf_inds)
+
+    if num_lf is not None:
+        avg_num_lf = num_lf
     
     # Randomly subset landfalls to plot based on avg_num_lf
     random_subset = np.random.choice(lf_inds,avg_num_lf,replace=False)
@@ -424,8 +433,11 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
         ydiffs.append(*(landfall_df.LAT.values-landfall_df.GEN_LAT.values))
         
         # Calculate storm lifetime
-        dates = np.unique(storm_df.index.get_level_values('ISO_TIME').date)
-        life.append(len(dates))
+        try:
+            dates = len(np.unique(storm_df.index.get_level_values('ISO_TIME').date))
+        except:
+            dates = math.ceil(len(storm_df.HOUR.values)/24)
+        life.append(dates)
         
         if intensity_metric == 'pressure':
             # If pressure data is missing, convert wind to pressure
@@ -446,7 +458,7 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
     xdiffs_all = []
     ydiffs_all = []
     
-    # Using complete storm data instead of random subset to calculate statistics
+    # Use complete storm data instead of random subset to calculate statistics
     for i in lf_inds:
         landfall_df = landfalls.iloc[[i]]
         sid = landfall_df.index.get_level_values('SID')[0]
@@ -472,11 +484,6 @@ def intensity_duration(ax,storms,landfalls,cmap='inferno',region='GL',vmin=900,v
     
     pm = ax.scatter(xdiffs,ydiffs,s=np.multiply(life,scale),edgecolor=edgecolor,linewidth=linewidth,
                     c=intensity,cmap=cmap,vmin=vmin,vmax=vmax,alpha=alpha)
-    
-    ax.axhline(0,color='k',alpha=0.5,linewidth=0.5,linestyle='--')
-    ax.axvline(0,color='k',alpha=0.5,linewidth=0.5,linestyle='--')
-    ax.set_xlim([-100,100])
-    ax.set_ylim([-40,40])
     
     return pm, count
         

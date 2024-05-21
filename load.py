@@ -84,7 +84,6 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year,no_ET):
         track_data['LON']   = track_data['LON'].copy().astype(float)
         track_data_WMO_WIND = track_data['WMO_WIND']
         track_data_WMO_PRES = track_data['WMO_PRES']
-        
         track_data_WMO_PRES.name = 'PRES'
         track_data_WMO_WIND.name = 'WIND'
         
@@ -166,10 +165,11 @@ def load_track_data(tracks,data_source,flip_lon,calendar,start_year,no_ET):
             # Generate storm IDs by concatenating spatial and temporal information of storm genesis
             storm_ids = [[sid.format(*list(np.array(lines_split[start][2:]).astype(int))+[gen_lat]+[gen_lon])] * length for start,length,gen_lat,gen_lon in zip(lines_start[:-1],storm_length,gen_lat_str,gen_lon_str)]
             
-            # Adding ensemble ID information to dataframe
+            # Adding ensemble number information to dataframe
             if data_source == 'model':
-                if track_file[-32] != 'r': ensemble = [[track_file[-33:-24]] * length for length in storm_length]
-                else: ensemble = [[track_file[-32:-24]] * length for length in storm_length]
+                ensemble = [[track_file.split('_')[-3]] * length for length in storm_length]
+                #if track_file[-32] != 'r': ensemble = [[track_file[-33:-24]] * length for length in storm_length]
+                #else: ensemble = [[track_file[-32:-24]] * length for length in storm_length]
             else: ensemble = [['REANALYSIS'] * length for length in storm_length]
 
    
