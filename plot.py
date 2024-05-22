@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+from collections import Counter
 import xarray as xr
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -109,52 +110,71 @@ def storm_track_plt(ax,storms,storm_numbers,landfalls,size=1.2,plot_type='wind_s
     if len(storm_numbers) == 1:
         return storm_number_id
 
-def categorize_landfall(landfall,plot_type):
-    # NATL basin
-    natl = Polygon([(-83,10),(-93,17),(-98,17),(-98,45),(-15,45),(-15,10)])
+def categorize_landfall(landfall, plot_type):
     # Landfall regions
     gc = Polygon([(-98, 17), (-98, 33), (-82, 33), (-81, 25), 
-              (-83, 25), (-83, 24), (-90, 24), (-90, 17)]) # Gulf Coast
+                  (-83, 25), (-83, 24), (-90, 24), (-90, 17)]) # Gulf Coast
     se = Polygon([(-83, 24), (-83, 25), (-81, 25), (-82, 33.5), 
                   (-80.5, 36.5), (-74.5, 36.5), (-74.5, 27), 
                   (-79.5, 27), (-79.5, 25), (-80, 24)])
     ne = Polygon([(-78, 36.5), (-78, 48), (-59, 48), (-59, 36.5)])
     ci_ca = Polygon([(-90., 15), (-90., 24), (-79.5, 24), (-79.5, 27), 
                      (-74.5, 27), (-58.5, 19.5), (-58.5, 11), (-85, 11)])
-
-    lf_regions = [gc,se,ne,ci_ca]
-    lf_facecolors = ['darkred','mediumblue','rebeccapurple','saddlebrown']
-    lf_edgecolors = ['red','deepskyblue','darkviolet','darkorange']
-
-    
     # Genesis regions
     mdr = Polygon([(-60,10), (-60,20), (-15,20), (-15,10)])
     ws = Polygon([(-81.5,25), (-81.5, 45), (-43,45), (-43,20), (-60,20)])
     gm = Polygon([(-98,17), (-98,31), (-81.5,31), (-81.5,25), (-93,17)])
     cs = Polygon([(-93,17), (-81.5,25), (-60,20), (-60,10), (-83,10)])
-    
     # NATL basin
-    natl = Polygon([(-85,11),(-90,17),(-98,17),(-98,45),(-15,45),(-15,10)])
+    natl = Polygon([(-83,10),(-93,17),(-98,17),(-98,45),(-15,45),(-15,10)])
     
     if plot_type == 'gen_to_lf':
-        genesis_point = Point(landfall.GEN_LON,landfall.GEN_LAT)
-        if mdr.contains(genesis_point): return 'mediumvioletred','deeppink'
-        elif ws.contains(genesis_point): return 'darkblue','dodgerblue'
-        elif gm.contains(genesis_point): return 'darkgreen','limegreen'
-        elif cs.contains(genesis_point): return 'darkgoldenrod','gold'
-        elif natl.contains(genesis_point): return 'darkgray','gainsboro'
-        else: return 'none','none'
+        genesis_point = Point(landfall.GEN_LON, landfall.GEN_LAT)
+        if mdr.contains(genesis_point): return 'mediumvioletred', 'deeppink', 'mdr'
+        elif ws.contains(genesis_point): return 'darkblue', 'dodgerblue', 'ws'
+        elif gm.contains(genesis_point): return 'darkgreen', 'limegreen', 'gm'
+        elif cs.contains(genesis_point): return 'darkgoldenrod', 'gold', 'cs'
+        elif natl.contains(genesis_point): return 'darkgray', 'gainsboro', 'other_natl'
+        else: return 'none', 'none', 'outside'
              
     if plot_type == 'lf_to_gen':
-        landfall_point = Point(landfall.LON,landfall.LAT)
-        if gc.contains(landfall_point): return 'darkred','red'
-        elif se.contains(landfall_point): return 'mediumblue','deepskyblue'
-        elif ne.contains(landfall_point): return 'rebeccapurple','darkviolet'
-        elif ci_ca.contains(landfall_point): return 'saddlebrown','darkorange'
-        elif natl.contains(landfall_point): return 'darkgray','gainsboro'
-        else: return 'none','none'
-        
-    
+        landfall_point = Point(landfall.LON, landfall.LAT)
+        if gc.contains(landfall_point): return 'darkred', 'red', 'gc'
+        elif se.contains(landfall_point): return 'mediumblue', 'deepskyblue', 'se'
+        elif ne.contains(landfall_point): return 'rebeccapurple', 'darkviolet', 'ne'
+        elif ci_ca.contains(landfall_point): return 'saddlebrown', 'darkorange', 'ci_ca'
+        elif natl.contains(landfall_point): return 'darkgray', 'gainsboro', 'other_natl'
+        else: return 'none','none', 'outside'
+
+def spaghetti_table(landfalls=None, nonlandfalls=None, region='NA', plot_type='gen_to_lf', lf=True, nlf=True):
+    '''Records count information for genesis and landfall regions.
+    Parameters:
+        landfalls (pandas DataFrame):
+        nonlandfalls (pandas DataFrame):
+        region (str):
+        plot_type (str):
+        lf (bool):
+        nlf (bool):
+    '''
+    subregions = []
+    if lf:
+        landfalls = util.subset_storms(region, landfalls)
+        for enum in np.unique(landfalls.index.get_level_values('ENUM')):
+            ens_lfs = (landfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()    
+            for index, lf in ens_lfs.iterrows():
+                _, _,subregion = categorize_landfall(lf, plot_type=plot_type)
+                subregions.append(subregion)
+    if nlf:
+        for enum in np.unique(nonlandfalls.index.get_level_values('ENUM')):
+            ens_nlfs = (nonlandfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
+            for index, nlf in ens_nlfs.iterrows():
+                _, _,subregion = categorize_landfall(nlf, plot_type=plot_type)
+                subregions.append(subregion)
+
+
+    subregions_count = Counter(subregions)
+    return subregions_count
+
 def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,lw=0.5,a=1,div=4):
     ''' Plots scatter points based on a user-defined storm genesis region.
     Parameters: 
@@ -172,6 +192,8 @@ def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
         None
     '''
 
+    subregions = []
+    
     if lf:
         lf_inds = range(len(landfalls))
         # Find average number of landfalls per ensemble member
@@ -189,12 +211,12 @@ def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
             temp_df.append(landfalls.iloc[[i]])
         
         landfalls = pd.concat(temp_df)
-            
+        
         for enum in np.unique(landfalls.index.get_level_values('ENUM')):
             ens_lfs = (landfalls.xs(enum,level='ENUM',drop_level=False)).reset_index()
             ens_stms = (storms.xs(enum,level='ENUM',drop_level=False)).reset_index()
             
-            for index,lf in ens_lfs.iterrows():
+            for index, lf in ens_lfs.iterrows():
                 sid = lf.SID
                 storm_df = ens_stms[ens_stms.SID == sid]
                 
@@ -206,13 +228,13 @@ def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
 
                 # Crop the storm_df dataframe using this index
                 cropped_storm_df = storm_df.loc[:lf_index]
-                facecolor, edgecolor = categorize_landfall(lf,plot_type='gen_to_lf')
-                    
+                facecolor, edgecolor, _ = categorize_landfall(lf, plot_type='gen_to_lf')
+
                 # Plot genesis point
-                ax.scatter(lf.LON,lf.LAT,s=s,facecolor=facecolor,
-                           edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
+                ax.scatter(lf.LON, lf.LAT, s=s, facecolor=facecolor,
+                           edgecolor=edgecolor, zorder=5, linewidths=lw, alpha=a)
                 # Plot storm track
-                ax.plot(cropped_storm_df.LON.values,cropped_storm_df.LAT.values,lw=lw*2,color=edgecolor,zorder=-1)
+                ax.plot(cropped_storm_df.LON.values, cropped_storm_df.LAT.values, lw=lw*2, color=edgecolor, zorder=-1)
 
             
         
@@ -249,8 +271,8 @@ def gen_to_lf(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
 
                 # Crop the storm_df dataframe using this index
                 cropped_storm_df = storm_df.loc[:nlf_index]
-                facecolor, edgecolor = categorize_landfall(nlf,plot_type='gen_to_lf')
-                    
+                facecolor, edgecolor, _ = categorize_landfall(nlf,plot_type='gen_to_lf')
+
                 # Plot lysis point
                 ax.scatter(nlf.LON,nlf.LAT,s=s,facecolor=facecolor,marker='X',
                            edgecolor=edgecolor,zorder=5,linewidths=lw,alpha=a)
@@ -310,7 +332,7 @@ def lf_to_gen(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
 
                 # Crop the storm_df dataframe using this index
                 cropped_storm_df = storm_df.loc[:lf_index]
-                facecolor, edgecolor = categorize_landfall(lf,plot_type='lf_to_gen')
+                facecolor, edgecolor, _ = categorize_landfall(lf,plot_type='lf_to_gen')
                     
                 # Plot genesis point
                 ax.scatter(lf.GEN_LON,lf.GEN_LAT,s=s,facecolor=facecolor,
@@ -357,7 +379,7 @@ def lf_to_gen(ax,storms,landfalls=None,nonlandfalls=None,lf=True,nlf=True,s=2.5,
 
                 # Crop the storm_df dataframe using this index
                 cropped_storm_df = storm_df.loc[:nlf_index]
-                facecolor, edgecolor = categorize_landfall(nlf,plot_type='lf_to_gen')
+                facecolor, edgecolor, _ = categorize_landfall(nlf,plot_type='lf_to_gen')
                     
                 # Plot lysis point
                 ax.scatter(nlf.GEN_LON,nlf.GEN_LAT,s=s,facecolor=facecolor,marker='X',

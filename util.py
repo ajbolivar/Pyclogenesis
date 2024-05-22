@@ -22,7 +22,8 @@ def region_bounds(region, longitudes, latitudes):
         latitudes  = [latitudes]
         
     # Define ocean basin polygons
-    NA = Polygon([(-70,0),(-92,17),(-98,17),(-98,90),(5,90),(5,0)])
+    
+    NA = Polygon([(-83,10),(-93,17),(-98,17),(-98,45),(-15,45),(-15,10)])
     
     try:
         # Global
