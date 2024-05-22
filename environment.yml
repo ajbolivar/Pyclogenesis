@@ -1,0 +1,18 @@
+name: pyclogenesis
+channels:
+  - conda-forge
+dependencies:
+  - python
+  - numpy
+  - xarray
+  - dask
+  - nco
+  - ncview
+  - ncl
+  - matplotlib
+  - cartopy
+  - scipy
+  - pandas
+  - nc-time-axis
+  - seaborn
+  - scikit-learn
