@@ -79,14 +79,15 @@ def count_storms(storms, landfalls):
     return storm_count, landfall_count, nonlandfall_count
 
 
-def calc_pace(storms, num_years, nan_value):
+def calc_pace(storms, num_years, nan_value, scale):
     PACE = []
 
     # Coefficients for PACE calculation from Zarzycki et al. 2021
     a1, a2, a3 = -5.46649378e-05, 1.15460199e+00, 3.38263470e+01
     
     # Find timestep in data to determine how many rows to skip for calculation
-    dt   = storms.index.get_level_values('ISO_TIME')[3].hour - storms.index.get_level_values('ISO_TIME')[2].hour
+    try: dt = pd.to_datetime(storms.ISO_TIME[3]).hour - pd.to_datetime(storms.ISO_TIME[2]).hour
+    except: dt = storms.HOUR[1] - storms.HOUR[0]
     skip = int(6 / dt)
     
     # Subset storm dataset by ensemble member
@@ -115,44 +116,12 @@ def calc_pace(storms, num_years, nan_value):
             PACE.append(storm_PACE)
     
     # Sum ACE for all storms, average by number of years, then by number of ensemble members
-    avg_annual_PACE = round(((np.nansum(PACE)/num_years)/num_members), 1)
-    
-    return avg_annual_PACE
-
-def calc_ace(storms, num_years, nan_value):
-    ACE = []
-    
-    # Find timestep in data to determine how many rows to skip for calculation
-    dt = storms.index.get_level_values('ISO_TIME')[3].hour - storms.index.get_level_values('ISO_TIME')[2].hour
-    skip = int(6 / dt)
-    
-    # Subset storm dataset by ensemble member
-    num_members = 0
-    for enum in np.unique(storms.index.get_level_values('ENUM')):
-        ens_df = storms.xs(enum,level='ENUM',drop_level=False)
-        num_members += 1
-        for sid in np.unique(ens_df.index.get_level_values('SID')):
-            storm_df = ens_df.xs(sid,level='SID')
-            storm_df = storm_df[::skip]
-            
-            # If no wind information available for storm, skip ACE calculation
-            if (storm_df.WIND.values == nan_value).all() == True:
-                continue
-            
-            # Convert from m/s to kts
-            storm_wind_kts = storm_df.WIND.values * 1.944
-            
-            # Calculate storm ACE
-            storm_ACE = (10**-4) * np.nansum((storm_wind_kts)**2)
-            ACE.append(storm_ACE)
-    
-    # Sum ACE for all storms, average by number of years, then by number of ensemble members
-    avg_annual_ACE = round(((np.nansum(ACE)/num_years)/num_members),1)
+    avg_annual_PACE = np.round(((np.nansum(PACE) / num_years) * scale) / num_members, 1)
     
     return avg_annual_ACE
     
 
-def calc_lifetime_lmi_minpres(storms, num_years, nan_value):
+def calc_lifetime_lmi_minpres(storms, num_years, nan_value, subset):
     LMI = []
     SLT = []
     min_pres = []
@@ -170,7 +139,7 @@ def calc_lifetime_lmi_minpres(storms, num_years, nan_value):
             
             # Record storm lifetime in days
             try:
-                dates = len(np.unique(storm_df.index.get_level_values('ISO_TIME').date))
+                dates = len(pd.to_datetime(storm_df.ISO_TIME).map(pd.Timestamp.date).unique())
             except:
                 dates = math.ceil(len(storm_df.HOUR.values)/24)
                 
@@ -181,8 +150,9 @@ def calc_lifetime_lmi_minpres(storms, num_years, nan_value):
     med_SLT      = round(np.median(SLT),1)
     annual_TCD   = round((np.sum(SLT)/num_years/num_members),1)
     avg_min_pres = round(np.mean(min_pres),1)
-    
-    return avg_LMI, avg_SLT, med_SLT, annual_TCD, avg_min_pres
+
+    if subset: return avg_LMI, avg_min_pres
+    else: return avg_LMI, avg_SLT, med_SLT, annual_TCD, avg_min_pres
 
 
 def calc_lfpres(landfalls,num_years,nan_value):
@@ -200,8 +170,8 @@ def calc_lfpres(landfalls,num_years,nan_value):
     return avg_lf_pres
             
     
-def storm_statistics(storms, landfalls, nonlandfalls, name, region='GL',
-                     start_year=1979,end_year=2014,nan_value=0):
+def storm_statistics(storms, landfalls, nonlandfalls, name, region='GL', start_year=1979, end_year=2014, 
+                     nan_value=0, sdd=False, obs=False, subset=False, scale=1):
     ''' Creates a csv containing several climatological TC statistics.
         Parameters: 
         storms (pandas.DataFrame):
@@ -220,11 +190,18 @@ def storm_statistics(storms, landfalls, nonlandfalls, name, region='GL',
     num_members = len(np.unique(storms.index.get_level_values('ENUM')))
     # Number of years based on start_year and end_year (user defined in case dataset contains no storms in the bounding years)
     num_years = len(np.arange(start_year, end_year + 1, 1))
+    year_range = np.arange(start_year, end_year + 1, 1)
     
     # Subset storms by time
-    storms = storms[storms.index.get_level_values('SID').str[0:4].astype('int').isin(np.arange(start_year, end_year + 1, 1))]
-    landfalls = landfalls[landfalls.index.get_level_values('SID').str[0:4].astype('int').isin(np.arange(start_year, end_year + 1, 1))]
-    nonlandfalls = nonlandfalls[nonlandfalls.index.get_level_values('SID').str[0:4].astype('int').isin(np.arange(start_year, end_year + 1, 1))]
+    if sdd:
+        storms = storms[storms.YEAR.isin(year_range)]
+        landfalls = landfalls[landfalls.YEAR.isin(year_range)]
+        nonlandfalls = nonlandfalls[nonlandfalls.YEAR.isin(year_range)]
+    else:
+        scale = 1 # scale should always be 1 if not using SDD model output
+        storms = storms[storms.index.get_level_values('SID').str[0:4].astype('int').isin(year_range)]
+        landfalls = landfalls[landfalls.index.get_level_values('SID').str[0:4].astype('int').isin(year_range)]
+        nonlandfalls = nonlandfalls[nonlandfalls.index.get_level_values('SID').str[0:4].astype('int').isin(year_range)]
     
     # Subset storms by basin
     storms       = subset_storms(region, storms)
@@ -232,7 +209,7 @@ def storm_statistics(storms, landfalls, nonlandfalls, name, region='GL',
     nonlandfalls = subset_storms(region, nonlandfalls)
     
     # Get storm counts
-    storm_count,landfall_count,nonlandfall_count = count_storms(storms, landfalls)
+    storm_count, landfall_count, nonlandfall_count = count_storms(storms, landfalls)
 
     # Annual average storm counts
     annual_storm_count = round(storm_count / num_years / num_members, 1)
@@ -244,15 +221,20 @@ def storm_statistics(storms, landfalls, nonlandfalls, name, region='GL',
     nonlandfall_percent = round(100 - landfall_percent, 1)
     
     # PACE, LMI, SLT, TCD, and pressure
-    annual_PACE = calc_pace(storms, num_years, nan_value)
-    avg_LMI, avg_SLT, med_SLT, tc_days, avg_min_pres = calc_lifetime_lmi_minpres(storms, num_years, nan_value)
+    annual_PACE = calc_pace(storms, num_years, nan_value, scale)
     avg_lf_pres = calc_lfpres(landfalls, num_years, nan_value)
-
-    stats = [name, annual_storm_count, tc_days, annual_PACE, avg_SLT, med_SLT, avg_LMI,
-    annual_landfall_count,annual_nonlandfall_count,landfall_percent,nonlandfall_percent, avg_min_pres, avg_lf_pres]
-    stats = pd.DataFrame([stats],columns=['NAME', 'STORM_COUNT_YR', 'TC_DAYS_YR', 'PACE_YR', 'AVG_LIFE', 'MED_LIFE',
-                                          'AVG_LMI', 'LF_COUNT_YR', 'NLF_COUNT_YR', 'LF_PERCENT', 'NLF_PERCENT',
-                                          'AVG_MIN_PRES', 'AVG_LF_PRES',])
+    if subset: 
+        annual_ACE = calc_ace(storms, num_years, nan_value, scale, obs)
+        avg_LMI, avg_min_pres = calc_lifetime_lmi_minpres(storms, num_years, nan_value, subset)
+        stats = [name, avg_LMI, annual_PACE, annual_ACE, landfall_percent, nonlandfall_percent, avg_min_pres, avg_lf_pres]
+        stats = pd.DataFrame([stats],columns=['NAME', 'AVG_LMI',  'PACE_YR', 'ACE_YR', 'LF_PERCENT', 'NLF_PERCENT', 'AVG_MIN_PRES', 'AVG_LF_PRES',])
+    else: 
+        avg_LMI, avg_SLT, med_SLT, tc_days, avg_min_pres = calc_lifetime_lmi_minpres(storms, num_years, nan_value, subset)
+        stats = [name, annual_storm_count, tc_days, annual_PACE, avg_SLT, med_SLT, avg_LMI,
+        annual_landfall_count,annual_nonlandfall_count,landfall_percent,nonlandfall_percent, avg_min_pres, avg_lf_pres]
+        stats = pd.DataFrame([stats],columns=['NAME', 'STORM_COUNT_YR', 'TC_DAYS_YR', 'PACE_YR', 'AVG_LIFE', 'MED_LIFE',
+                                              'AVG_LMI', 'LF_COUNT_YR', 'NLF_COUNT_YR', 'LF_PERCENT', 'NLF_PERCENT',
+                                              'AVG_MIN_PRES', 'AVG_LF_PRES',])
     
     os.makedirs('tc_stats', exist_ok=True)
     # Save stats to csv
@@ -318,7 +300,6 @@ def storm_statistics_sdd(storms, landfalls, nonlandfalls, name, region='GL',
     # Find timestep in data to determine how many rows to skip for calculation
     if obs:
         dt = pd.to_datetime(storms.ISO_TIME[3]).hour - pd.to_datetime(storms.ISO_TIME[2]).hour
-        print(dt)
     else:
         dt = storms.HOUR[1] - storms.HOUR[0]
 

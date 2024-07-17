@@ -415,17 +415,17 @@ def open_files(path, keys, labels, keyword='', icol=None):
         file.fillna(-999, inplace=True)
         dictionary[l] = file
     return dictionary
-
+## EDIT ALL INPUTS HERE ##
 ######################################################################################
 # Edit filepath according to where your data is stored
-input_dir  = '/glade/work/abolivar/Pyclogenesis_data/sdd_model_storms/monthly'
-output_dir = '/glade/u/home/abolivar'
+input_dir  = '/path/to/input/dir'
+output_dir = '/path/to/output/dir'
 # List of product names (should be incorporated into file name)
-products = ['ERA5']#,'ERA5','HadGEM3-GC31-HM', 'HadGEM3-GC31-LM', 'ECMWF-IFS-HR', 'ECMWF-IFS-LR',
-            # 'EC-Earth3P-HR','EC-Earth3P','CNRM-CM6-1-HR','CNRM-CM6-1','MPI-ESM1-2-XR','MPI-ESM1-2-HR']
+products = ['IBTrACS','ERA5','HadGEM3-GC31-HM', 'HadGEM3-GC31-LM', 'ECMWF-IFS-HR', 'ECMWF-IFS-LR',
+            'EC-Earth3P-HR','EC-Earth3P','CNRM-CM6-1-HR','CNRM-CM6-1','MPI-ESM1-2-XR','MPI-ESM1-2-HR']
 # Labels can be different from products for the purposes of plotting
-labels   = ['ERA5-D']#,'ERA5','HadGEM3-GC31-HM', 'HadGEM3-GC31-LM', 'ECMWF-IFS-HR', 'ECMWF-IFS-LR',
-            # 'EC-Earth3P-HR','EC-Earth3P','CNRM-CM6-1-HR','CNRM-CM6-1','MPI-ESM1-2-XR','MPI-ESM1-2-HR']
+labels   = ['IBTrACS','ERA5','HadGEM3-GC31-HM', 'HadGEM3-GC31-LM', 'ECMWF-IFS-HR', 'ECMWF-IFS-LR',
+            'EC-Earth3P-HR','EC-Earth3P','CNRM-CM6-1-HR','CNRM-CM6-1','MPI-ESM1-2-XR','MPI-ESM1-2-HR']
 row_num = 1
 col_num = 1
 
@@ -439,11 +439,11 @@ nonlandfalls = open_files(f'{input_dir}/nonlandfalling_storms', products, labels
 # To modify figure characteristics, please see parameters in the respective functions below
 # The parameters rows and cols are set to 1 by default. If you have multiple products to plot, 
 # please change the rows and cols parameters or it will simply plot the first one in your list 
-spaghetti_plot(keys=labels, filepath=f'{output_dir}/spaghetti_gen2lf_era5-sdd.pdf', plot_type='gen_to_lf',
+spaghetti_plot(keys=labels, filepath=f'{output_dir}/spaghetti_gen2lf_pdf', plot_type='gen_to_lf',
                rows=row_num, cols=col_num, start_letter='b')
-spaghetti_plot(keys=labels, filepath=f'{output_dir}/spaghetti_lf2gen_era5-sdd.pdf', plot_type='lf_to_gen',
+spaghetti_plot(keys=labels, filepath=f'{output_dir}/spaghetti_lf2gen.pdf', plot_type='lf_to_gen',
                rows=row_num, cols=col_num, start_letter='b')
-scatter_plot(keys=labels, filepath=f'{output_dir}/scatter_era5-sdd.pdf', s=2, lw=0.25, 
+scatter_plot(keys=labels, filepath=f'{output_dir}/scatter.pdf', s=2, lw=0.25, 
              rows=row_num, cols=col_num, start_letter='b')
 # IBTrACS is required to use this function
-# statistics_heatmap(keys=labels, filepath=f'{output_dir}/stats_gcm',figsize=(4,4),filetype='pdf')
+statistics_heatmap(keys=labels, filepath=f'{output_dir}/stats',figsize=(4,4),filetype='pdf')

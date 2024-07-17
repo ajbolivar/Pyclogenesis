@@ -453,10 +453,10 @@ def intensity_duration(ax,storms,landfalls,num_lf=None,cmap='inferno',region='GL
         
         xdiffs.append(*(landfall_df.LON.values-landfall_df.GEN_LON.values))
         ydiffs.append(*(landfall_df.LAT.values-landfall_df.GEN_LAT.values))
-        
+
         # Calculate storm lifetime
         try:
-            dates = len(np.unique(storm_df.index.get_level_values('ISO_TIME').date))
+            dates = len(np.unique(pd.to_datetime(storm_df.ISO_TIME).dt.date))
         except:
             dates = math.ceil(len(storm_df.HOUR.values)/24)
         life.append(dates)
@@ -549,7 +549,7 @@ def temporal_lf(ax,landfalls,label,size=5,lw=0.25,color='red',edgecolor='black',
         None
     '''
     
-    lf = landfalls[(landfalls.index.get_level_values('ISO_TIME')).month.isin(months)]
+    lf = landfalls[(landfalls.ISO_TIME).month.isin(months)]
     
     ax.scatter(lf.LON,lf.LAT,c=color,edgecolor=edgecolor,linewidth=lw,s=size,zorder=2,label=label,alpha=a,marker=marker)
     
